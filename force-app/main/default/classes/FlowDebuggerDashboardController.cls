@@ -325,13 +325,13 @@ public with sharing class FlowDebuggerDashboardController {
         }
 
         // Get flow labels from FlowDefinitionView
-        // FlowDefinitionView does not support queryMore(), so we must use LIMIT
+        // FlowDefinitionView does not support queryMore(), max batch size ~200
         Map<String, String> flowLabelMap = new Map<String, String>();
         for (FlowDefinitionView fdv : [
             SELECT ApiName, Label
             FROM FlowDefinitionView
             WHERE IsActive = true
-            LIMIT 2000
+            LIMIT 200
         ]) {
             flowLabelMap.put(fdv.ApiName, fdv.Label);
         }
