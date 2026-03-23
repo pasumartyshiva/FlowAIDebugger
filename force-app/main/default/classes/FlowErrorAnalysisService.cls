@@ -65,7 +65,7 @@ public with sharing class FlowErrorAnalysisService {
     }
 
     @future(callout=true)
-    private static void performAIAnalysisAsync(Set<Id> errorLogIds) {
+    public static void performAIAnalysisAsync(Set<Id> errorLogIds) {
         List<Flow_Error_Log__c> errorLogs = [
             SELECT Id, Flow_API_Name__c, Element_API_Name__c, Element_Type__c,
                    Error_Message__c, Error_Type__c, Interview_GUID__c,
