@@ -31,13 +31,15 @@
     </start>
     <status>Active</status>
 
-    <!-- This deliberately creates an Opportunity WITHOUT the required CloseDate and StageName fields -->
-    <!-- This will cause: REQUIRED_FIELD_MISSING: Required fields are missing: [CloseDate, StageName] -->
+    <!-- Step 1: Try to create an Opportunity WITHOUT required fields → DML error -->
     <recordCreates>
         <name>Create_Invalid_Opportunity</name>
         <label>Create Invalid Opportunity</label>
         <locationX>176</locationX>
         <locationY>158</locationY>
+        <faultConnector>
+            <targetReference>Log_Flow_Error</targetReference>
+        </faultConnector>
         <inputAssignments>
             <field>Name</field>
             <value>
@@ -51,5 +53,68 @@
             </value>
         </inputAssignments>
         <object>Opportunity</object>
+    </recordCreates>
+
+    <!-- Step 2: Fault path — log the error to Flow_Error_Log__c -->
+    <recordCreates>
+        <name>Log_Flow_Error</name>
+        <label>Log Flow Error</label>
+        <locationX>176</locationX>
+        <locationY>350</locationY>
+        <inputAssignments>
+            <field>Flow_API_Name__c</field>
+            <value>
+                <stringValue>Test_Error_Flow_for_Debugger</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Flow_Label__c</field>
+            <value>
+                <stringValue>Test Error Flow for Debugger</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Element_API_Name__c</field>
+            <value>
+                <stringValue>Create_Invalid_Opportunity</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Error_Message__c</field>
+            <value>
+                <elementReference>$Flow.FaultMessage</elementReference>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Error_Type__c</field>
+            <value>
+                <stringValue>FLOW_ELEMENT_ERROR</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Error_Timestamp__c</field>
+            <value>
+                <elementReference>$Flow.CurrentDateTime</elementReference>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Severity__c</field>
+            <value>
+                <stringValue>Medium</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>Status__c</field>
+            <value>
+                <stringValue>New</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>AI_Analysis_Complete__c</field>
+            <value>
+                <booleanValue>false</booleanValue>
+            </value>
+        </inputAssignments>
+        <object>Flow_Error_Log__c</object>
     </recordCreates>
 </Flow>

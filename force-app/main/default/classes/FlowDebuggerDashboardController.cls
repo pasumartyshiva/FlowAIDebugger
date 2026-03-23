@@ -243,16 +243,23 @@ public with sharing class FlowDebuggerDashboardController {
 
     @AuraEnabled
     public static String runAdHocAnalysis() {
+        List<String> messages = new List<String>();
         Integer newErrorsCreated = 0;
 
-        // Step 1: Poll Tooling API for failed flow interviews (last 24h)
+        // Step 1: Try to poll for failed flow interviews (best-effort)
         try {
             newErrorsCreated = pollAndCreateErrorLogs();
+            if (newErrorsCreated > 0) {
+                messages.add(newErrorsCreated + ' new error(s) captured from Flow Interviews.');
+            }
         } catch (Exception e) {
-            System.debug(LoggingLevel.WARN, 'Poll failed (non-blocking): ' + e.getMessage());
+            messages.add('Interview poll: ' + e.getMessage());
         }
 
-        // Step 2: Trigger AI analysis on any unanalyzed error logs
+        // Step 2: Count total active (non-resolved) error logs
+        Integer totalErrors = [SELECT COUNT() FROM Flow_Error_Log__c WHERE Status__c != 'Resolved'];
+
+        // Step 3: Trigger AI analysis on any unanalyzed error logs
         List<Flow_Error_Log__c> unanalyzed = [
             SELECT Id
             FROM Flow_Error_Log__c
@@ -267,16 +274,13 @@ public with sharing class FlowDebuggerDashboardController {
                 ids.add(log.Id);
             }
             FlowErrorAnalysisService.performAIAnalysisAsync(ids);
+            messages.add(unanalyzed.size() + ' queued for AI analysis.');
         }
 
-        // Return count for the UI
-        Integer totalErrors = [SELECT COUNT() FROM Flow_Error_Log__c WHERE Status__c != 'Resolved'];
+        // Build summary message
         String msg = totalErrors + ' active error(s) found.';
-        if (newErrorsCreated > 0) {
-            msg += ' ' + newErrorsCreated + ' new error(s) captured.';
-        }
-        if (!unanalyzed.isEmpty()) {
-            msg += ' ' + unanalyzed.size() + ' queued for AI analysis.';
+        if (!messages.isEmpty()) {
+            msg += ' ' + String.join(messages, ' ');
         }
         return msg;
     }
