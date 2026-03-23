@@ -216,7 +216,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
     ])
       .then(([errors, metrics]) => {
         if (errors && errors.length > 0) {
-          this.aggregatedErrors = errors;
+          this.aggregatedErrors = errors.map(e => ({ ...e }));
           this.metricsData = metrics || {};
           this.usingSampleData = false;
         } else {
@@ -278,7 +278,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
     ])
       .then(([, , errors, metrics]) => {
         if (errors && errors.length > 0) {
-          this.aggregatedErrors = errors; this.metricsData = metrics || {};
+          this.aggregatedErrors = errors.map(e => ({ ...e })); this.metricsData = metrics || {};
         } else {
           this.aggregatedErrors = []; this.metricsData = null;
         }
@@ -609,11 +609,28 @@ export default class FlowDebuggerDashboard extends LightningElement {
     this.showToast(title, message, 'error');
   }
 
+  formatTimestamp(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHrs = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return diffMins + 'm ago';
+    if (diffHrs < 24) return diffHrs + 'h ago';
+    if (diffDays < 7) return diffDays + 'd ago';
+
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
   // ── Computed Properties ──
   get expandAllIcon() { return this.allExpanded ? 'utility:chevrondown' : 'utility:chevronright'; }
   get expandAllLabel() { return this.allExpanded ? 'Collapse All' : 'Expand All'; }
   get errorCountLabel() { const c = this.aggregatedErrors.length; return `${c} error${c !== 1 ? 's' : ''}`; }
-  get detailColspan() { return this.isEditMode ? 11 : 10; }
+  get detailColspan() { return this.isEditMode ? 12 : 11; }
 
   get summaryCards() {
     const data = this.dashboardData || {};
@@ -652,6 +669,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
       isSelected: error.isSelected || false,
       truncatedMessage: error.latestErrorMessage && error.latestErrorMessage.length > MESSAGE_TRUNCATE_LENGTH
         ? error.latestErrorMessage.substring(0, MESSAGE_TRUNCATE_LENGTH) + '...' : error.latestErrorMessage || 'No error message',
+      formattedTimestamp: error.latestTimestamp ? this.formatTimestamp(error.latestTimestamp) : '',
       rootCause: error.rootCause || 'Not yet analyzed.',
       immediateAction: error.immediateAction || 'Run AI Analysis to generate recommendations.',
       fixSteps: Array.isArray(error.fixSteps) ? error.fixSteps : (error.fixSteps ? error.fixSteps.split('\n').filter(s => s.trim()) : []),

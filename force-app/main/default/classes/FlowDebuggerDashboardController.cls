@@ -25,6 +25,7 @@ public with sharing class FlowDebuggerDashboardController {
         @AuraEnabled public Id ownerId;
         @AuraEnabled public String ownerName;
         @AuraEnabled public String latestErrorMessage;
+        @AuraEnabled public DateTime latestTimestamp;
         @AuraEnabled public String severity;
         @AuraEnabled public Boolean isCritical;
         @AuraEnabled public Boolean isAnalyzed;
@@ -204,6 +205,7 @@ public with sharing class FlowDebuggerDashboardController {
             agg.ownerId = latest.User__c;
             agg.ownerName = latest.User__r != null ? latest.User__r.Name : '';
             agg.latestErrorMessage = latest.Error_Message__c;
+            agg.latestTimestamp = latest.Error_Timestamp__c;
             agg.severity = latest.Severity__c;
             agg.isCritical = latest.Severity__c == 'Critical';
             agg.isAnalyzed = latest.AI_Analysis_Complete__c;

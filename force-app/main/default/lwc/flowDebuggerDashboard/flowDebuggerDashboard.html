@@ -152,6 +152,7 @@
               <th style="width: 12%;"><div>Status</div></th>
               <th style="width: 14%;"><div>Owner</div></th>
               <th><div>Latest Error</div></th>
+              <th style="width: 11%;"><div>Last Occurred</div></th>
               <th style="width: 7%;"><div>Severity</div></th>
               <th style="width: 7%;"><div>AI Analysis</div></th>
               <th style="width: 10%;"><div>Actions</div></th>
@@ -227,6 +228,9 @@
                 </td>
                 <td>
                   <span class="truncated-text" title={error.latestErrorMessage}>{error.truncatedMessage}</span>
+                </td>
+                <td>
+                  <span class="timestamp-text">{error.formattedTimestamp}</span>
                 </td>
                 <td>
                   <span class="severity-tag" data-severity={error.severity}>{error.severity}</span>
