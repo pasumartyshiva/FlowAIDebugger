@@ -7,6 +7,7 @@ import runAdHocAnalysis from '@salesforce/apex/FlowDebuggerDashboardController.r
 import getDebuggerConfig from '@salesforce/apex/FlowDebuggerDashboardController.getDebuggerConfig';
 import getMetricsSummary from '@salesforce/apex/FlowDebuggerDashboardController.getMetricsSummary';
 import getErrorAnalysis from '@salesforce/apex/FlowDoctorController.getErrorAnalysis';
+import runAnalysisForError from '@salesforce/apex/FlowDoctorController.runAnalysisForError';
 import markErrorResolved from '@salesforce/apex/FlowDoctorController.markErrorResolved';
 import updateErrorStatus from '@salesforce/apex/FlowDoctorController.updateErrorStatus';
 import updateErrorOwner from '@salesforce/apex/FlowDoctorController.updateErrorOwner';
@@ -486,13 +487,13 @@ export default class FlowDebuggerDashboard extends LightningElement {
   }
 
   loadErrorAnalysis(error) {
-    getErrorAnalysis({ errorId: error.id })
+    getErrorAnalysis({ errorLogId: error.id })
       .then(analysis => {
         if (analysis) {
-          error.rootCause = analysis.rootCause || 'Analysis pending...';
-          error.immediateAction = analysis.immediateAction || 'Review error logs';
-          error.fixSteps = analysis.fixSteps ? analysis.fixSteps.split('\n') : [];
-          error.confidenceScore = analysis.confidenceScore || 0;
+          error.rootCause = analysis.Root_Cause__c || 'Analysis pending...';
+          error.immediateAction = analysis.Immediate_Action__c || 'Review error logs';
+          error.fixSteps = analysis.Fix_Steps__c ? analysis.Fix_Steps__c.split('\n') : [];
+          error.confidenceScore = analysis.Confidence_Score__c || 0;
           error.isAnalyzed = true;
           this.aggregatedErrors = [...this.aggregatedErrors];
         }
@@ -520,21 +521,64 @@ export default class FlowDebuggerDashboard extends LightningElement {
     this.startAnalysisAnimation();
     error.isAnalyzing = true;
     this.aggregatedErrors = [...this.aggregatedErrors];
-    getErrorAnalysis({ errorId: error.id })
+
+    runAnalysisForError({ errorLogId: error.id })
       .then(analysis => {
         if (analysis) {
-          error.rootCause = analysis.rootCause || 'Analysis pending...';
-          error.immediateAction = analysis.immediateAction || 'Review error logs';
-          error.fixSteps = analysis.fixSteps ? analysis.fixSteps.split('\n') : [];
-          error.confidenceScore = analysis.confidenceScore || 0;
+          // Analysis already existed or completed synchronously
+          error.rootCause = analysis.Root_Cause__c || 'Analysis pending...';
+          error.immediateAction = analysis.Immediate_Action__c || 'Review error logs';
+          error.fixSteps = analysis.Fix_Steps__c ? analysis.Fix_Steps__c.split('\n') : [];
+          error.confidenceScore = analysis.Confidence_Score__c || 0;
           error.isAnalyzed = true;
           error.isAnalyzing = false;
           this.aggregatedErrors = [...this.aggregatedErrors];
+          this.stopAnalysisAnimation();
           this.showToast('Success', 'Analysis complete', 'success');
+        } else {
+          // Analysis was queued (@future) — poll for result
+          this.showToast('Info', 'AI analysis queued. Checking for results...', 'info');
+          this.pollForAnalysis(error, 0);
         }
-        this.stopAnalysisAnimation();
       })
-      .catch(err => { this.stopAnalysisAnimation(); this.handleError('Error analyzing', err); });
+      .catch(err => {
+        error.isAnalyzing = false;
+        this.aggregatedErrors = [...this.aggregatedErrors];
+        this.stopAnalysisAnimation();
+        this.handleError('Error analyzing', err);
+      });
+  }
+
+  pollForAnalysis(error, attempt) {
+    if (attempt >= 10) {
+      error.isAnalyzing = false;
+      this.aggregatedErrors = [...this.aggregatedErrors];
+      this.stopAnalysisAnimation();
+      this.showToast('Info', 'Analysis is still processing. Refresh the page in a moment.', 'info');
+      return;
+    }
+    // eslint-disable-next-line @lwc/lwc/no-async-operation
+    setTimeout(() => {
+      runAnalysisForError({ errorLogId: error.id })
+        .then(analysis => {
+          if (analysis) {
+            error.rootCause = analysis.Root_Cause__c || 'Analysis pending...';
+            error.immediateAction = analysis.Immediate_Action__c || 'Review error logs';
+            error.fixSteps = analysis.Fix_Steps__c ? analysis.Fix_Steps__c.split('\n') : [];
+            error.confidenceScore = analysis.Confidence_Score__c || 0;
+            error.isAnalyzed = true;
+            error.isAnalyzing = false;
+            this.aggregatedErrors = [...this.aggregatedErrors];
+            this.stopAnalysisAnimation();
+            this.showToast('Success', 'Analysis complete', 'success');
+          } else {
+            this.pollForAnalysis(error, attempt + 1);
+          }
+        })
+        .catch(() => {
+          this.pollForAnalysis(error, attempt + 1);
+        });
+    }, 3000);
   }
 
   // ── Analysis Loading Animation ──

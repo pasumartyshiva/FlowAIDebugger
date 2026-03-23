@@ -91,6 +91,34 @@ public with sharing class FlowDoctorController {
         update Security.stripInaccessible(AccessType.UPDATABLE, new List<Flow_Error_Log__c>{ errorLog }).getRecords();
     }
 
+    /**
+     * Triggers AI analysis for a single error and returns the result.
+     * Unlike getErrorAnalysis (cacheable), this is imperative and will
+     * kick off analysis if none exists yet.
+     */
+    @AuraEnabled
+    public static Flow_Error_Analysis__c runAnalysisForError(Id errorLogId) {
+        // Check if analysis already exists
+        List<Flow_Error_Analysis__c> existing = [
+            SELECT Root_Cause__c, Root_Cause_Category__c, Affected_Element_Details__c,
+                   User_Impact_Description__c, Immediate_Action__c, Long_Term_Fix__c,
+                   Fix_Steps__c, Test_Scenario__c, Documentation_URL__c,
+                   Pattern_Detected__c, Confidence_Score__c
+            FROM Flow_Error_Analysis__c
+            WHERE Flow_Error_Log__c = :errorLogId
+            LIMIT 1
+        ];
+        if (!existing.isEmpty()) {
+            return existing[0];
+        }
+
+        // No analysis yet — trigger it asynchronously
+        FlowErrorAnalysisService.performAIAnalysisAsync(new Set<Id>{ errorLogId });
+
+        // Return null — UI should poll/refresh after a delay
+        return null;
+    }
+
     @AuraEnabled(cacheable=true)
     public static List<Map<String, String>> getActiveUsers() {
         List<Map<String, String>> users = new List<Map<String, String>>();
