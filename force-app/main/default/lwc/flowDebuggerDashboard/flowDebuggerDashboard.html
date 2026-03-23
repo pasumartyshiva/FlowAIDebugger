@@ -1,0 +1,528 @@
+<template>
+  <div class="dashboard-container">
+    <!-- Header Banner -->
+    <div class="header-banner">
+      <div class="header-banner-left">
+        <div class="header-icon-wrap">
+          <lightning-icon icon-name="utility:bug" size="medium"></lightning-icon>
+        </div>
+        <div class="header-text">
+          <h1>Flow AI Debugger</h1>
+          <p>AI-Powered Flow Error Detection &amp; Resolution</p>
+        </div>
+      </div>
+      <div class="header-banner-right">
+        <div class="config-indicator">
+          <span class="config-label">Real-Time Monitoring:</span>
+          <span class="config-badge" data-toggle={isPlatformEventsOn}>
+            <span class="status-dot" data-status={isPlatformEventsOn}></span>
+            {configStatus}
+          </span>
+        </div>
+        <lightning-button-icon
+          icon-name="utility:info"
+          variant="border-filled"
+          alternative-text="Help"
+          title="Quick Start Guide"
+          onclick={handleOpenHelp}
+          class="slds-var-m-left_small"
+        ></lightning-button-icon>
+        <lightning-button
+          label="Run Ad-Hoc Analysis"
+          onclick={handleRunAdHoc}
+          variant="brand"
+          disabled={isAdHocDisabled}
+          class="slds-var-m-left_small"
+          icon-name="utility:play"
+        ></lightning-button>
+      </div>
+    </div>
+
+    <!-- Summary Cards Row -->
+    <div class="summary-cards-row">
+      <template for:each={summaryCards} for:item="card">
+        <div key={card.id} class="summary-card-wrapper">
+          <div class="summary-card" data-severity={card.severity}>
+            <div class="card-icon-area" data-severity={card.severity}>
+              <lightning-icon icon-name={card.icon} size="small"></lightning-icon>
+            </div>
+            <div class="card-body">
+              <span class="card-label">{card.label}</span>
+              <span class="card-value">{card.value}</span>
+              <span class="card-trend" data-trend={card.trend}>
+                <lightning-icon icon-name={card.trendIcon} size="xx-small"></lightning-icon>
+                {card.trendText}
+              </span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <div class="slds-grid slds-gutters slds-grid_vertical-align-end slds-wrap">
+        <div class="slds-col slds-size_12-of-12 slds-medium-size_3-of-12">
+          <label class="filter-label">Time Range</label>
+          <lightning-button-group>
+            <lightning-button label="24h" onclick={handleTimeRangeChange} data-range="24h" variant={timeRange24hVariant}></lightning-button>
+            <lightning-button label="7d" onclick={handleTimeRangeChange} data-range="7d" variant={timeRange7dVariant}></lightning-button>
+            <lightning-button label="30d" onclick={handleTimeRangeChange} data-range="30d" variant={timeRange30dVariant}></lightning-button>
+            <lightning-button label="All Time" onclick={handleTimeRangeChange} data-range="all" variant={timeRangeAllVariant}></lightning-button>
+          </lightning-button-group>
+        </div>
+        <div class="slds-col slds-size_12-of-12 slds-medium-size_3-of-12">
+          <label class="filter-label">Severity</label>
+          <lightning-combobox name="severity" label="" value={severityFilter} options={severityOptions} onchange={handleSeverityFilterChange} variant="label-hidden"></lightning-combobox>
+        </div>
+        <div class="slds-col slds-size_12-of-12 slds-medium-size_4-of-12">
+          <label class="filter-label">Search</label>
+          <lightning-input type="search" placeholder="Search flow name..." onchange={handleSearch} variant="label-hidden"></lightning-input>
+        </div>
+        <div class="slds-col slds-size_12-of-12 slds-medium-size_2-of-12 filter-actions">
+          <lightning-button-icon icon-name="utility:refresh" onclick={handleRefresh} variant="border-filled" title="Refresh" class="slds-var-m-right_x-small"></lightning-button-icon>
+          <lightning-button-icon icon-name="utility:download" onclick={handleExportPDF} variant="border-filled" title="Export CSV"></lightning-button-icon>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sample Data Banner -->
+    <template if:true={usingSampleData}>
+      <div class="sample-data-banner">
+        <lightning-icon icon-name="utility:info" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+        Showing sample data for demonstration. Enable real-time monitoring or run ad-hoc analysis to see live errors.
+        <a href="#" class="dismiss-link" onclick={dismissSampleData}>Dismiss</a>
+      </div>
+    </template>
+
+    <!-- Loading State -->
+    <template if:true={isLoading}>
+      <div class="loading-container">
+        <div class="analysis-animation">
+          <div class="einstein-float">
+            <lightning-icon icon-name="utility:einstein" size="large"></lightning-icon>
+          </div>
+          <div class="loading-dots">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
+          <p class="loading-text">Analyzing flow errors with Einstein AI...</p>
+        </div>
+      </div>
+    </template>
+
+    <!-- Main Data Table -->
+    <template if:false={isLoading}>
+      <div class="table-container">
+        <!-- Expand/Collapse All Toolbar -->
+        <div class="table-toolbar">
+          <div class="toolbar-left">
+            <button class="toolbar-btn" onclick={handleToggleExpandAll}>
+              <lightning-icon icon-name={expandAllIcon} size="xx-small"></lightning-icon>
+              <span>{expandAllLabel}</span>
+            </button>
+            <span class="toolbar-count">{errorCountLabel}</span>
+          </div>
+          <div class="toolbar-right">
+            <lightning-button label="Export CSV" icon-name="utility:download" onclick={handleExportPDF} variant="neutral" class="toolbar-export-btn"></lightning-button>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 36px;"><div></div></th>
+              <th style="width: 18%;"><div>Flow Name</div></th>
+              <th style="width: 7%;"><div>Errors (24h)</div></th>
+              <th style="width: 13%;"><div>Status</div></th>
+              <th style="width: 13%;"><div>Owner</div></th>
+              <th style="width: 18%;"><div>Latest Error</div></th>
+              <th style="width: 7%;"><div>Severity</div></th>
+              <th style="width: 7%;"><div>AI Analysis</div></th>
+              <th style="width: 13%;"><div>Actions</div></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template for:each={formattedErrors} for:item="error">
+              <!-- Main Row -->
+              <tr key={error.id} class="data-row" data-is-critical={error.isCritical}>
+                <!-- Chevron (FIRST column) -->
+                <td class="chevron-cell">
+                  <button class="chevron-btn" onclick={handleRowToggle} data-error-id={error.id} title="Expand/Collapse">
+                    <lightning-icon icon-name={error.chevronIcon} size="xx-small"></lightning-icon>
+                  </button>
+                </td>
+                <td>
+                  <div class="cell-flow-name">
+                    <template if:true={error.isCritical}>
+                      <span class="critical-tag">CRITICAL</span>
+                    </template>
+                    <span class="flow-name-text">{error.flowName}</span>
+                  </div>
+                </td>
+                <td>
+                  <span class="count-pill" data-count={error.errorCount}>{error.errorCount}</span>
+                </td>
+                <td>
+                  <div class="inline-combobox">
+                    <lightning-combobox
+                      name="status"
+                      label=""
+                      value={error.status}
+                      options={statusOptions}
+                      onchange={handleStatusChange}
+                      data-error-id={error.id}
+                      variant="label-hidden"
+                      dropdown-alignment="auto"
+                    ></lightning-combobox>
+                  </div>
+                </td>
+                <td>
+                  <div class="inline-combobox">
+                    <lightning-combobox
+                      name="owner"
+                      label=""
+                      value={error.ownerId}
+                      options={userOptions}
+                      onchange={handleOwnerChange}
+                      data-error-id={error.id}
+                      variant="label-hidden"
+                      dropdown-alignment="auto"
+                      placeholder="Unassigned"
+                    ></lightning-combobox>
+                  </div>
+                </td>
+                <td>
+                  <span class="truncated-text" title={error.latestErrorMessage}>{error.truncatedMessage}</span>
+                </td>
+                <td>
+                  <span class="severity-tag" data-severity={error.severity}>{error.severity}</span>
+                </td>
+                <td>
+                  <template if:true={error.isAnalyzed}>
+                    <span class="ai-tag ai-tag-done">
+                      <lightning-icon icon-name="utility:check" size="xx-small" class="ai-tag-icon"></lightning-icon>
+                      Done
+                    </span>
+                  </template>
+                  <template if:false={error.isAnalyzed}>
+                    <span class="ai-tag ai-tag-pending">
+                      <lightning-icon icon-name="utility:clock" size="xx-small" class="ai-tag-icon"></lightning-icon>
+                      Pending
+                    </span>
+                  </template>
+                </td>
+                <td>
+                  <div class="row-actions">
+                    <lightning-button label="AI Analysis" variant="brand" icon-name="utility:einstein" onclick={handleRunAnalysisClick} data-error-id={error.id} class="action-btn-sm"></lightning-button>
+                  </div>
+                </td>
+              </tr>
+
+              <!-- Expandable Detail Panel -->
+              <template if:true={error.showDetail}>
+                <tr key={error.detailKey} class="detail-row">
+                  <td colspan="9" class="detail-cell">
+                    <div class="detail-panel">
+                      <!-- Detail Header Bar -->
+                      <div class="detail-header-bar">
+                        <div class="detail-chip">
+                          <span class="detail-chip-label">Severity</span>
+                          <span class="severity-tag" data-severity={error.severity}>{error.severity}</span>
+                        </div>
+                        <div class="detail-chip">
+                          <span class="detail-chip-label">Confidence</span>
+                          <span class="detail-chip-score">{error.confidenceScore}%</span>
+                        </div>
+                        <div class="detail-chip">
+                          <span class="detail-chip-label">Errors</span>
+                          <span class="count-pill" data-count={error.errorCount}>{error.errorCount}</span>
+                        </div>
+                        <div class="detail-chip">
+                          <span class="detail-chip-label">AI Status</span>
+                          <template if:true={error.isAnalyzed}>
+                            <span class="ai-tag ai-tag-done">Analyzed</span>
+                          </template>
+                          <template if:false={error.isAnalyzed}>
+                            <span class="ai-tag ai-tag-pending">Pending</span>
+                          </template>
+                        </div>
+                      </div>
+
+                      <!-- Detail Body -->
+                      <div class="detail-body">
+                        <div class="slds-grid slds-gutters slds-wrap">
+                          <div class="slds-col slds-size_12-of-12 slds-large-size_6-of-12">
+                            <!-- Full Error Message -->
+                            <div class="detail-card">
+                              <div class="detail-card-header">
+                                <lightning-icon icon-name="utility:error" size="xx-small" class="detail-card-icon"></lightning-icon>
+                                Full Error Message
+                              </div>
+                              <div class="detail-card-body">
+                                <code class="error-code-block">{error.latestErrorMessage}</code>
+                              </div>
+                            </div>
+
+                            <!-- Root Cause -->
+                            <div class="detail-card">
+                              <div class="detail-card-header">
+                                <lightning-icon icon-name="utility:bug" size="xx-small" class="detail-card-icon"></lightning-icon>
+                                Root Cause (Einstein AI)
+                              </div>
+                              <div class="detail-card-body">
+                                <p>{error.rootCause}</p>
+                              </div>
+                            </div>
+
+                            <!-- Immediate Action -->
+                            <div class="detail-card detail-card-warning">
+                              <div class="detail-card-header">
+                                <lightning-icon icon-name="utility:warning" size="xx-small" class="detail-card-icon"></lightning-icon>
+                                Immediate Action
+                              </div>
+                              <div class="detail-card-body">
+                                <p>{error.immediateAction}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="slds-col slds-size_12-of-12 slds-large-size_6-of-12">
+                            <!-- Fix Steps -->
+                            <div class="detail-card">
+                              <div class="detail-card-header">
+                                <lightning-icon icon-name="utility:steps" size="xx-small" class="detail-card-icon"></lightning-icon>
+                                Fix Steps
+                              </div>
+                              <div class="detail-card-body">
+                                <template if:true={error.hasFixSteps}>
+                                  <ol class="fix-steps">
+                                    <template for:each={error.fixSteps} for:item="step">
+                                      <li key={step}>{step}</li>
+                                    </template>
+                                  </ol>
+                                </template>
+                                <template if:false={error.hasFixSteps}>
+                                  <p class="empty-text">Run AI Analysis to generate fix recommendations.</p>
+                                </template>
+                              </div>
+                            </div>
+
+                            <!-- Confidence Score -->
+                            <div class="detail-card">
+                              <div class="detail-card-header">
+                                <lightning-icon icon-name="utility:metrics" size="xx-small" class="detail-card-icon"></lightning-icon>
+                                Confidence Score
+                              </div>
+                              <div class="detail-card-body">
+                                <div class="confidence-bar-row">
+                                  <lightning-progress-bar value={error.confidenceScore} size="large"></lightning-progress-bar>
+                                  <span class="confidence-value">{error.confidenceScore}%</span>
+                                </div>
+                                <p class="confidence-hint">{error.confidenceExplanation}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </template>
+
+            <!-- Empty State -->
+            <template if:true={isEmptyState}>
+              <tr>
+                <td colspan="9">
+                  <div class="empty-state">
+                    <div class="empty-state-circle">
+                      <lightning-icon icon-name="utility:check" size="large" class="empty-state-icon"></lightning-icon>
+                    </div>
+                    <h3>All Clear!</h3>
+                    <p>No errors found. Your flows are running smoothly!</p>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <!-- Metrics Section -->
+    <div class="metrics-section">
+      <div class="metrics-header" onclick={toggleMetrics}>
+        <span class="metrics-title">
+          <lightning-icon icon-name="utility:chart" size="small"></lightning-icon>
+          Metrics & Analytics
+        </span>
+        <lightning-icon icon-name={metricsChevronIcon} size="small"></lightning-icon>
+      </div>
+      <template if:true={showMetrics}>
+        <div class="metrics-body">
+          <div class="slds-grid slds-gutters">
+            <div class="slds-col slds-size_12-of-12 slds-large-size_6-of-12">
+              <div class="metric-panel">
+                <h4>Error Trend (24h)</h4>
+                <div class="metric-placeholder">
+                  <lightning-icon icon-name="utility:chart" size="large"></lightning-icon>
+                  <span>Trend chart rendering here</span>
+                </div>
+              </div>
+            </div>
+            <div class="slds-col slds-size_12-of-12 slds-large-size_6-of-12">
+              <div class="metric-panel">
+                <h4>Top 5 Error Flows</h4>
+                <template if:true={hasTopFlows}>
+                  <ul class="top-flows">
+                    <template for:each={topErrorFlows} for:item="flow">
+                      <li key={flow.id} class="top-flow-row">
+                        <span class="top-flow-rank">{flow.rank}</span>
+                        <span class="top-flow-name">{flow.name}</span>
+                        <span class="top-flow-count">{flow.count}</span>
+                      </li>
+                    </template>
+                  </ul>
+                </template>
+                <template if:false={hasTopFlows}>
+                  <div class="metric-placeholder">
+                    <span>No flow data available</span>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Help Modal -->
+  <template if:true={showHelpModal}>
+    <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open slds-modal_large">
+      <div class="slds-modal__container">
+        <header class="slds-modal__header modal-header-blue">
+          <button class="slds-button slds-button_icon slds-modal__close slds-button_icon-inverse" onclick={handleCloseHelp}>
+            <lightning-icon icon-name="utility:close" alternative-text="Close" size="small" variant="inverse"></lightning-icon>
+          </button>
+          <h2 class="slds-modal__title" style="color: white;">
+            <lightning-icon icon-name="utility:knowledge_base" size="small" class="slds-m-right_x-small" variant="inverse"></lightning-icon>
+            Quick Start Guide
+          </h2>
+        </header>
+        <div class="slds-modal__content slds-p-around_large">
+          <!-- Flow Diagram -->
+          <div class="slds-var-m-bottom_large">
+            <h3 class="guide-heading">
+              <lightning-icon icon-name="utility:flow" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+              How It Works
+            </h3>
+            <div class="flow-pipeline">
+              <div class="pipeline-step">
+                <span class="pipeline-num">1</span>
+                <strong>Error Captured</strong>
+                <span>Real-Time Monitoring / Polling</span>
+              </div>
+              <span class="pipeline-arrow">&#8594;</span>
+              <div class="pipeline-step">
+                <span class="pipeline-num">2</span>
+                <strong>Error Logged</strong>
+                <span>Flow_Error_Log__c</span>
+              </div>
+              <span class="pipeline-arrow">&#8594;</span>
+              <div class="pipeline-step">
+                <span class="pipeline-num">3</span>
+                <strong>Einstein Analyzes</strong>
+                <span>ConnectApi.EinsteinLLM</span>
+              </div>
+              <span class="pipeline-arrow">&#8594;</span>
+              <div class="pipeline-step">
+                <span class="pipeline-num">4</span>
+                <strong>Results Displayed</strong>
+                <span>Root cause + fix steps</span>
+              </div>
+            </div>
+          </div>
+          <hr class="slds-var-m-vertical_medium" />
+
+          <!-- Steps -->
+          <div class="slds-box guide-step slds-var-m-bottom_medium">
+            <h3 class="slds-text-heading_small slds-var-m-bottom_small">
+              <span class="step-circle">1</span> Error Detection
+            </h3>
+            <p>Errors are captured via <strong>real-time monitoring</strong> (<code>Flow_Error_Alert__e</code> platform events) or polling every 5 minutes.</p>
+            <p class="slds-text-body_small slds-text-color_weak slds-var-m-top_x-small">Severity is auto-calculated: 10+ errors/10min = Critical, 5-9 = High, 2-4 = Medium, 0-1 = Low.</p>
+          </div>
+          <div class="slds-box guide-step slds-var-m-bottom_medium">
+            <h3 class="slds-text-heading_small slds-var-m-bottom_small">
+              <span class="step-circle">2</span> Einstein AI Analysis
+            </h3>
+            <p>Powered by <strong>Salesforce Einstein LLM</strong> via <code>ConnectApi.EinsteinLLM.generateMessages()</code>.</p>
+            <p class="slds-var-m-top_x-small"><strong>Automatic:</strong> Real-time monitoring ON triggers analysis. <strong>Manual:</strong> Click "AI Analysis" button on any row.</p>
+          </div>
+          <div class="slds-box guide-step slds-var-m-bottom_medium">
+            <h3 class="slds-text-heading_small slds-var-m-bottom_small">
+              <span class="step-circle">3</span> Review & Resolve
+            </h3>
+            <p>Click the <strong>chevron</strong> to expand analysis details. Use <strong>"Mark Resolved"</strong> to close errors. Export results as PDF.</p>
+          </div>
+
+          <!-- Confidence Score Table -->
+          <div class="slds-box slds-var-m-bottom_medium guide-info-box">
+            <h3 class="slds-text-heading_small slds-var-m-bottom_small">
+              <lightning-icon icon-name="utility:metrics" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+              Confidence Scores
+            </h3>
+            <p class="slds-text-body_small slds-var-m-bottom_small">Score is returned by Einstein AI based on how well the error matches known patterns.</p>
+            <table class="guide-table">
+              <thead><tr><th>Score</th><th>Meaning</th><th>Source</th></tr></thead>
+              <tbody>
+                <tr><td><span class="score-badge score-high">90-100%</span></td><td>Clearly maps to known issue</td><td>Einstein AI</td></tr>
+                <tr><td><span class="score-badge score-med">50-89%</span></td><td>Likely correct, other causes possible</td><td>Einstein AI</td></tr>
+                <tr><td><span class="score-badge score-low">21-49%</span></td><td>Uncertain, needs manual review</td><td>Einstein AI</td></tr>
+                <tr><td><span class="score-badge score-fallback">20%</span></td><td>Keyword-based fallback</td><td>Rule engine</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Severity Table -->
+          <div class="slds-box slds-var-m-bottom_medium guide-info-box">
+            <h3 class="slds-text-heading_small slds-var-m-bottom_small">
+              <lightning-icon icon-name="utility:warning" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+              Severity Levels
+            </h3>
+            <table class="guide-table">
+              <thead><tr><th>Severity</th><th>Error Frequency</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td><span class="severity-tag" data-severity="Critical">Critical</span></td><td>10+ in 10 min</td><td>Immediate fix</td></tr>
+                <tr><td><span class="severity-tag" data-severity="High">High</span></td><td>5-9 in 10 min</td><td>Fix within 24h</td></tr>
+                <tr><td><span class="severity-tag" data-severity="Medium">Medium</span></td><td>2-4 in 10 min</td><td>Next sprint</td></tr>
+                <tr><td><span class="severity-tag" data-severity="Low">Low</span></td><td>0-1 in 10 min</td><td>When convenient</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tips -->
+          <div class="slds-box guide-warn-box">
+            <h3 class="slds-text-heading_small slds-var-m-bottom_small">
+              <lightning-icon icon-name="utility:warning" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
+              Troubleshooting
+            </h3>
+            <ul class="slds-list_dotted slds-text-body_small">
+              <li><strong>No errors?</strong> Enable real-time monitoring or run Ad-Hoc Analysis.</li>
+              <li><strong>AI not working?</strong> Check Einstein LLM config and permission set.</li>
+              <li><strong>Score is 20%?</strong> Einstein was unavailable; fallback analysis ran.</li>
+              <li><strong>Stale data?</strong> Click refresh to reload.</li>
+            </ul>
+          </div>
+        </div>
+        <footer class="slds-modal__footer">
+          <lightning-button label="Close" variant="brand" onclick={handleCloseHelp}></lightning-button>
+        </footer>
+      </div>
+    </section>
+    <div class="slds-backdrop slds-backdrop_open"></div>
+  </template>
+</template>

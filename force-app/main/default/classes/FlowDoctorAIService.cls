@@ -281,24 +281,44 @@ public with sharing class FlowDoctorAIService {
     private static String validateCategory(String category) {
         if (String.isBlank(category)) return 'Configuration Error';
 
-        Set<String> validCategories = new Set<String>{
-            'NULL_REFERENCE', 'DML_ERROR', 'GOVERNOR_LIMIT',
-            'PERMISSION_ERROR', 'DATA_INTEGRITY', 'CONFIGURATION_ERROR',
-            'RECORD_LOCKING', 'EXTERNAL_SERVICE', 'LOOP_ERROR', 'PLATFORM_EVENT'
+        // Map from AI prompt categories to picklist values
+        Map<String, String> categoryMap = new Map<String, String>{
+            'NULL_REFERENCE' => 'Null Reference',
+            'DML_ERROR' => 'DML Exception',
+            'GOVERNOR_LIMIT' => 'Governor Limits',
+            'PERMISSION_ERROR' => 'Permission Error',
+            'DATA_INTEGRITY' => 'Data Integrity',
+            'CONFIGURATION_ERROR' => 'Configuration Error',
+            'RECORD_LOCKING' => 'Record Locking',
+            'EXTERNAL_SERVICE' => 'External Service',
+            'LOOP_ERROR' => 'Loop Error',
+            'PLATFORM_EVENT' => 'Platform Event',
+            'MISSING_FAULT_PATH' => 'Missing Fault Path',
+            'FIELD_VALIDATION' => 'Field Validation',
+            'DATA_ISSUE' => 'Data Issue'
         };
 
-        // Clean the category
-        String cleaned = category.trim().toUpperCase().replaceAll('[^A-Z_]', '');
+        // Also accept the picklist values directly
+        Set<String> validPicklistValues = new Set<String>(categoryMap.values());
 
-        if (validCategories.contains(cleaned)) {
-            // Convert to Title Case for display
-            return cleaned.replace('_', ' ').toLowerCase().capitalize();
+        // Check if it's already a valid picklist value (AI sometimes returns the display name)
+        for (String pv : validPicklistValues) {
+            if (category.trim().equalsIgnoreCase(pv)) {
+                return pv;
+            }
         }
 
-        // Fuzzy match - check if any valid category is contained in the response
-        for (String valid : validCategories) {
-            if (category.toUpperCase().contains(valid)) {
-                return valid.replace('_', ' ').toLowerCase().capitalize();
+        // Clean to uppercase underscore format and look up
+        String cleaned = category.trim().toUpperCase().replaceAll('[^A-Z_]', '');
+        if (categoryMap.containsKey(cleaned)) {
+            return categoryMap.get(cleaned);
+        }
+
+        // Fuzzy match - check if any key is contained in the AI response
+        String upper = category.toUpperCase();
+        for (String key : categoryMap.keySet()) {
+            if (upper.contains(key)) {
+                return categoryMap.get(key);
             }
         }
 

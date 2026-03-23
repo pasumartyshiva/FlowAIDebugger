@@ -252,10 +252,10 @@ public with sharing class FlowErrorAnalysisService {
             return 'Null Reference';
         } else if (msg.contains('validation') || msg.contains('required field')
                    || msg.contains('duplicate') || msg.contains('trigger')) {
-            return 'Dml Error';
+            return 'DML Exception';
         } else if (msg.contains('too many soql') || msg.contains('too many dml')
                    || msg.contains('cpu time') || msg.contains('governor') || msg.contains('limit')) {
-            return 'Governor Limit';
+            return 'Governor Limits';
         } else if (msg.contains('insufficient') || msg.contains('permission')
                    || msg.contains('access') || msg.contains('sharing')) {
             return 'Permission Error';

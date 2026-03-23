@@ -8,11 +8,6 @@
         <valueSetDefinition>
             <sorted>false</sorted>
             <value>
-                <fullName>Missing Fault Path</fullName>
-                <default>false</default>
-                <label>Missing Fault Path</label>
-            </value>
-            <value>
                 <fullName>Null Reference</fullName>
                 <default>false</default>
                 <label>Null Reference</label>
@@ -23,9 +18,9 @@
                 <label>DML Exception</label>
             </value>
             <value>
-                <fullName>Field Validation</fullName>
+                <fullName>Governor Limits</fullName>
                 <default>false</default>
-                <label>Field Validation</label>
+                <label>Governor Limits</label>
             </value>
             <value>
                 <fullName>Permission Error</fullName>
@@ -33,14 +28,44 @@
                 <label>Permission Error</label>
             </value>
             <value>
-                <fullName>Governor Limits</fullName>
+                <fullName>Data Integrity</fullName>
                 <default>false</default>
-                <label>Governor Limits</label>
+                <label>Data Integrity</label>
             </value>
             <value>
                 <fullName>Configuration Error</fullName>
                 <default>false</default>
                 <label>Configuration Error</label>
+            </value>
+            <value>
+                <fullName>Record Locking</fullName>
+                <default>false</default>
+                <label>Record Locking</label>
+            </value>
+            <value>
+                <fullName>External Service</fullName>
+                <default>false</default>
+                <label>External Service</label>
+            </value>
+            <value>
+                <fullName>Loop Error</fullName>
+                <default>false</default>
+                <label>Loop Error</label>
+            </value>
+            <value>
+                <fullName>Platform Event</fullName>
+                <default>false</default>
+                <label>Platform Event</label>
+            </value>
+            <value>
+                <fullName>Missing Fault Path</fullName>
+                <default>false</default>
+                <label>Missing Fault Path</label>
+            </value>
+            <value>
+                <fullName>Field Validation</fullName>
+                <default>false</default>
+                <label>Field Validation</label>
             </value>
             <value>
                 <fullName>Data Issue</fullName>

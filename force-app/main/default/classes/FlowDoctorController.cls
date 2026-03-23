@@ -52,13 +52,51 @@ public with sharing class FlowDoctorController {
             WHERE Id = :errorLogId
             LIMIT 1
         ];
-        
+
         Long resolutionMinutes = (System.now().getTime() - errorLog.Error_Timestamp__c.getTime()) / 60000;
-        
+
         errorLog.Status__c = 'Resolved';
         errorLog.Resolution_Notes__c = resolutionNotes;
         errorLog.Resolution_Time_Minutes__c = resolutionMinutes;
-        
+
         update errorLog;
+    }
+
+    @AuraEnabled
+    public static void updateErrorStatus(Id errorLogId, String status) {
+        Flow_Error_Log__c errorLog = [
+            SELECT Id, Error_Timestamp__c
+            FROM Flow_Error_Log__c
+            WHERE Id = :errorLogId
+            WITH SECURITY_ENFORCED
+            LIMIT 1
+        ];
+
+        errorLog.Status__c = status;
+
+        if (status == 'Resolved') {
+            Long resolutionMinutes = (System.now().getTime() - errorLog.Error_Timestamp__c.getTime()) / 60000;
+            errorLog.Resolution_Time_Minutes__c = resolutionMinutes;
+        }
+
+        update Security.stripInaccessible(AccessType.UPDATABLE, new List<Flow_Error_Log__c>{ errorLog }).getRecords();
+    }
+
+    @AuraEnabled
+    public static void updateErrorOwner(Id errorLogId, Id ownerId) {
+        Flow_Error_Log__c errorLog = new Flow_Error_Log__c(
+            Id = errorLogId,
+            User__c = ownerId
+        );
+        update Security.stripInaccessible(AccessType.UPDATABLE, new List<Flow_Error_Log__c>{ errorLog }).getRecords();
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<Map<String, String>> getActiveUsers() {
+        List<Map<String, String>> users = new List<Map<String, String>>();
+        for (User u : [SELECT Id, Name FROM User WHERE IsActive = true ORDER BY Name LIMIT 200]) {
+            users.add(new Map<String, String>{ 'label' => u.Name, 'value' => u.Id });
+        }
+        return users;
     }
 }
