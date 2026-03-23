@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>62.0</apiVersion>
+    <description>Test flow that intentionally causes errors for testing Flow AI Debugger. Trigger by editing any Account and setting Description to contain TRIGGER_ERROR.</description>
+    <interviewLabel>Test Error Flow {!$Flow.CurrentDateTime}</interviewLabel>
+    <label>Test Error Flow for Debugger</label>
+    <processMetadataValues>
+        <name>BuilderType</name>
+        <value>
+            <stringValue>LightningFlowBuilder</stringValue>
+        </value>
+    </processMetadataValues>
+    <processType>AutoLaunchedFlow</processType>
+    <start>
+        <locationX>50</locationX>
+        <locationY>0</locationY>
+        <connector>
+            <targetReference>Create_Invalid_Opportunity</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>Description</field>
+            <operator>Contains</operator>
+            <value>
+                <stringValue>TRIGGER_ERROR</stringValue>
+            </value>
+        </filters>
+        <object>Account</object>
+        <recordTriggerType>CreateAndUpdate</recordTriggerType>
+        <triggerType>RecordAfterSave</triggerType>
+    </start>
+    <status>Active</status>
+
+    <!-- This deliberately creates an Opportunity WITHOUT the required CloseDate and StageName fields -->
+    <!-- This will cause: REQUIRED_FIELD_MISSING: Required fields are missing: [CloseDate, StageName] -->
+    <recordCreates>
+        <name>Create_Invalid_Opportunity</name>
+        <label>Create Invalid Opportunity</label>
+        <locationX>176</locationX>
+        <locationY>158</locationY>
+        <inputAssignments>
+            <field>Name</field>
+            <value>
+                <stringValue>Test Opp - Missing Required Fields</stringValue>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>AccountId</field>
+            <value>
+                <elementReference>$Record.Id</elementReference>
+            </value>
+        </inputAssignments>
+        <object>Opportunity</object>
+    </recordCreates>
+</Flow>

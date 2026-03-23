@@ -90,7 +90,7 @@
     <template if:true={usingSampleData}>
       <div class="sample-data-banner">
         <lightning-icon icon-name="utility:info" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
-        Showing sample data for demonstration. Enable real-time monitoring or run ad-hoc analysis to see live errors.
+        Showing sample data for demonstration only. AI Analysis is not available on sample records.
         <a href="#" class="dismiss-link" onclick={dismissSampleData}>Dismiss</a>
       </div>
     </template>
@@ -365,6 +365,15 @@
                     </div>
                     <h3>All Clear!</h3>
                     <p>No errors found. Your flows are running smoothly!</p>
+                    <div class="empty-state-actions">
+                      <lightning-button
+                        label="Load Sample Data"
+                        icon-name="utility:preview"
+                        onclick={handleLoadSampleData}
+                        variant="neutral"
+                        class="slds-var-m-top_medium"
+                      ></lightning-button>
+                    </div>
                   </div>
                 </td>
               </tr>

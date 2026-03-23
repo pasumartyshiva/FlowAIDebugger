@@ -722,6 +722,7 @@
 .empty-state-icon { color: var(--c-low); }
 .empty-state h3 { color: var(--c-text); font-size: 18px; font-weight: 700; margin: 0 0 6px; }
 .empty-state p { color: var(--c-text2); font-size: 14px; margin: 0; }
+.empty-state-actions { margin-top: 16px; }
 
 /* ---- HELP MODAL ---- */
 .modal-header-blue {

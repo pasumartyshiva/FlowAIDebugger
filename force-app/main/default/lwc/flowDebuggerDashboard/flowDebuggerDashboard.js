@@ -152,7 +152,6 @@ export default class FlowDebuggerDashboard extends LightningElement {
   @track showMetrics = false;
   @track showHelpModal = false;
   @track usingSampleData = false;
-  @track sampleDataDismissed = false;
   @track allExpanded = false;
 
   // Edit mode
@@ -221,18 +220,21 @@ export default class FlowDebuggerDashboard extends LightningElement {
           this.metricsData = metrics || {};
           this.usingSampleData = false;
         } else {
-          this.loadSampleData();
+          this.aggregatedErrors = [];
+          this.metricsData = null;
+          this.usingSampleData = false;
         }
         this.isLoading = false;
       })
-      .catch(() => { this.loadSampleData(); this.isLoading = false; });
+      .catch(() => {
+        this.aggregatedErrors = [];
+        this.metricsData = null;
+        this.usingSampleData = false;
+        this.isLoading = false;
+      });
   }
 
-  loadSampleData() {
-    if (this.sampleDataDismissed) {
-      this.aggregatedErrors = []; this.dashboardData = null; this.metricsData = null; this.usingSampleData = false;
-      return;
-    }
+  handleLoadSampleData() {
     let filtered = SAMPLE_ERRORS.map(e => ({ ...e }));
     if (this.severityFilter !== 'All') filtered = filtered.filter(e => e.severity === this.severityFilter);
     if (this.searchTerm) {
@@ -243,11 +245,12 @@ export default class FlowDebuggerDashboard extends LightningElement {
     this.dashboardData = SAMPLE_DASHBOARD_DATA;
     this.metricsData = SAMPLE_METRICS;
     this.usingSampleData = true;
+    this.currentPage = 1;
   }
 
   dismissSampleData(event) {
     if (event) event.preventDefault();
-    this.sampleDataDismissed = true; this.usingSampleData = false;
+    this.usingSampleData = false;
     this.aggregatedErrors = []; this.dashboardData = null; this.metricsData = null;
   }
 
@@ -265,9 +268,9 @@ export default class FlowDebuggerDashboard extends LightningElement {
   }
 
   handleRefresh() {
-    this.sampleDataDismissed = false;
     this.isLoading = true;
     this.currentPage = 1;
+    this.usingSampleData = false;
     Promise.all([
       refreshApex(this.wiredDashboardResult), refreshApex(this.wiredConfigResult),
       getAggregatedErrors({ timeRangeFilter: this.timeRange, severityFilter: this.severityFilter, searchTerm: this.searchTerm }),
@@ -275,12 +278,14 @@ export default class FlowDebuggerDashboard extends LightningElement {
     ])
       .then(([, , errors, metrics]) => {
         if (errors && errors.length > 0) {
-          this.aggregatedErrors = errors; this.metricsData = metrics || {}; this.usingSampleData = false;
-        } else { this.loadSampleData(); }
+          this.aggregatedErrors = errors; this.metricsData = metrics || {};
+        } else {
+          this.aggregatedErrors = []; this.metricsData = null;
+        }
         this.isLoading = false;
         this.showToast('Success', 'Dashboard refreshed', 'success');
       })
-      .catch(() => { this.loadSampleData(); this.isLoading = false; });
+      .catch(() => { this.aggregatedErrors = []; this.metricsData = null; this.isLoading = false; });
   }
 
   // ── Pagination ──
