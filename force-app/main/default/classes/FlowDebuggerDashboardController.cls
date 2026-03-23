@@ -282,38 +282,31 @@ public with sharing class FlowDebuggerDashboardController {
     }
 
     /**
-     * Synchronous polling via Tooling API — finds failed FlowInterviews
-     * from the last 24 hours and creates Flow_Error_Log__c records directly.
+     * Polls for failed FlowInterviews using standard SOQL (no Tooling API / HTTP).
+     * Creates Flow_Error_Log__c records for any new failures found.
      * Returns the number of new error logs created.
      */
     private static Integer pollAndCreateErrorLogs() {
-        String sinceStr = System.now().addHours(-24).formatGmt('yyyy-MM-dd\'T\'HH:mm:ss\'Z\'');
-        String query = 'SELECT Id, FlowVersionViewId, CurrentElement, InterviewStatus, '
-            + 'InterviewLabel, CreatedDate, CreatedById '
-            + 'FROM FlowInterview '
-            + 'WHERE InterviewStatus = \'Failed\' '
-            + 'AND CreatedDate >= ' + sinceStr;
+        DateTime since = System.now().addHours(-24);
 
-        HttpRequest req = new HttpRequest();
-        req.setEndpoint(URL.getOrgDomainUrl().toExternalForm()
-            + '/services/data/v62.0/tooling/query?q='
-            + EncodingUtil.urlEncode(query, 'UTF-8'));
-        req.setMethod('GET');
-        req.setHeader('Authorization', 'Bearer ' + UserInfo.getSessionId());
-        req.setHeader('Content-Type', 'application/json');
-
-        Http http = new Http();
-        HttpResponse res = http.send(req);
-
-        if (res.getStatusCode() != 200) {
-            System.debug(LoggingLevel.WARN, 'Tooling API returned: ' + res.getStatusCode() + ' ' + res.getBody());
+        // Query failed flow interviews via standard SOQL
+        List<FlowInterview> failedInterviews;
+        try {
+            failedInterviews = [
+                SELECT Id, InterviewLabel, CurrentElement, InterviewStatus,
+                       CreatedDate, CreatedById
+                FROM FlowInterview
+                WHERE InterviewStatus = 'Error'
+                AND CreatedDate >= :since
+                ORDER BY CreatedDate DESC
+                LIMIT 100
+            ];
+        } catch (Exception e) {
+            System.debug(LoggingLevel.WARN, 'FlowInterview query failed: ' + e.getMessage());
             return 0;
         }
 
-        Map<String, Object> result = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
-        List<Object> records = (List<Object>) result.get('records');
-
-        if (records == null || records.isEmpty()) {
+        if (failedInterviews.isEmpty()) {
             return 0;
         }
 
@@ -322,38 +315,51 @@ public with sharing class FlowDebuggerDashboardController {
         for (Flow_Error_Log__c existing : [
             SELECT Interview_GUID__c FROM Flow_Error_Log__c
             WHERE Interview_GUID__c != null
-            AND Error_Timestamp__c >= :System.now().addHours(-24)
+            AND Error_Timestamp__c >= :since
         ]) {
             existingGuids.add(existing.Interview_GUID__c);
         }
 
+        // Get flow labels from FlowDefinitionView
+        Set<String> flowDevNames = new Set<String>();
+        // Parse flow developer name from interview label (format: "FlowLabel DateTime")
+        // We'll match by querying all active flow definitions
+        Map<String, String> flowLabelMap = new Map<String, String>();
+        for (FlowDefinitionView fdv : [
+            SELECT ApiName, Label
+            FROM FlowDefinitionView
+            WHERE IsActive = true
+        ]) {
+            flowLabelMap.put(fdv.ApiName, fdv.Label);
+        }
+
         List<Flow_Error_Log__c> newLogs = new List<Flow_Error_Log__c>();
 
-        for (Object record : records) {
-            Map<String, Object> interview = (Map<String, Object>) record;
-            String interviewId = (String) interview.get('Id');
+        for (FlowInterview fi : failedInterviews) {
+            String guid = fi.Id;
 
             // Skip duplicates
-            if (existingGuids.contains(interviewId)) {
+            if (existingGuids.contains(guid)) {
                 continue;
             }
 
-            // Get flow details from Tooling API
-            String flowVersionId = (String) interview.get('FlowVersionViewId');
-            Map<String, String> flowInfo = getFlowInfo(flowVersionId);
+            // Extract flow developer name from interview label
+            // Interview label format is typically: "FlowLabel MM/DD/YYYY, HH:MM AM/PM"
+            String flowApiName = extractFlowApiName(fi.InterviewLabel, flowLabelMap);
+            String flowLabel = flowLabelMap.containsKey(flowApiName)
+                ? flowLabelMap.get(flowApiName) : fi.InterviewLabel;
 
             Flow_Error_Log__c log = new Flow_Error_Log__c(
-                Flow_API_Name__c = flowInfo.get('apiName'),
-                Flow_Label__c = flowInfo.get('label'),
-                Element_API_Name__c = (String) interview.get('CurrentElement'),
-                Error_Message__c = 'Flow interview failed. Interview: '
-                    + (String) interview.get('InterviewLabel'),
-                Error_Type__c = 'FLOW_INTERVIEW_FAILED',
-                Interview_GUID__c = interviewId,
-                User__c = (String) interview.get('CreatedById'),
-                Error_Timestamp__c = DateTime.valueOf(
-                    ((String) interview.get('CreatedDate')).replace('T', ' ').replace('.000+0000', '')
-                ),
+                Flow_API_Name__c = flowApiName,
+                Flow_Label__c = flowLabel,
+                Element_API_Name__c = fi.CurrentElement,
+                Error_Message__c = 'FLOW_ELEMENT_ERROR An unhandled fault has occurred in this flow. '
+                    + 'Flow interview failed at element: ' + fi.CurrentElement
+                    + '. Interview: ' + fi.InterviewLabel,
+                Error_Type__c = 'FLOW_ELEMENT_ERROR',
+                Interview_GUID__c = guid,
+                User__c = fi.CreatedById,
+                Error_Timestamp__c = fi.CreatedDate,
                 Severity__c = 'Medium',
                 Status__c = 'New',
                 AI_Analysis_Complete__c = false
@@ -370,48 +376,23 @@ public with sharing class FlowDebuggerDashboardController {
     }
 
     /**
-     * Retrieves flow API name and label from Tooling API.
+     * Extracts flow API name by matching interview label against known flow labels.
      */
-    private static Map<String, String> getFlowInfo(String flowVersionId) {
-        Map<String, String> info = new Map<String, String>{
-            'apiName' => 'Unknown',
-            'label' => 'Unknown Flow'
-        };
+    private static String extractFlowApiName(String interviewLabel, Map<String, String> flowLabelMap) {
+        if (String.isBlank(interviewLabel)) return 'Unknown';
 
-        if (String.isBlank(flowVersionId)) return info;
-
-        try {
-            String query = 'SELECT Definition.DeveloperName, Definition.MasterLabel '
-                + 'FROM FlowVersionView WHERE DurableId = \'' + String.escapeSingleQuotes(flowVersionId) + '\'';
-
-            HttpRequest req = new HttpRequest();
-            req.setEndpoint(URL.getOrgDomainUrl().toExternalForm()
-                + '/services/data/v62.0/tooling/query?q='
-                + EncodingUtil.urlEncode(query, 'UTF-8'));
-            req.setMethod('GET');
-            req.setHeader('Authorization', 'Bearer ' + UserInfo.getSessionId());
-            req.setHeader('Content-Type', 'application/json');
-
-            Http http = new Http();
-            HttpResponse res = http.send(req);
-
-            if (res.getStatusCode() == 200) {
-                Map<String, Object> result = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
-                List<Object> records = (List<Object>) result.get('records');
-                if (records != null && !records.isEmpty()) {
-                    Map<String, Object> rec = (Map<String, Object>) records[0];
-                    Map<String, Object> def = (Map<String, Object>) rec.get('Definition');
-                    if (def != null) {
-                        info.put('apiName', (String) def.get('DeveloperName'));
-                        info.put('label', (String) def.get('MasterLabel'));
-                    }
-                }
+        // Try matching by flow label (interview label starts with flow label)
+        for (String apiName : flowLabelMap.keySet()) {
+            String label = flowLabelMap.get(apiName);
+            if (interviewLabel.startsWith(label)) {
+                return apiName;
             }
-        } catch (Exception e) {
-            System.debug(LoggingLevel.WARN, 'getFlowInfo failed: ' + e.getMessage());
         }
 
-        return info;
+        // Fallback: use the interview label itself cleaned up
+        // Remove trailing date/time portion (e.g. " 3/22/2026, 11:20 PM")
+        String cleaned = interviewLabel.replaceAll('\\s+\\d{1,2}/\\d{1,2}/\\d{4}.*$', '');
+        return cleaned.replaceAll('\\s+', '_');
     }
 
     // ── Config ──
