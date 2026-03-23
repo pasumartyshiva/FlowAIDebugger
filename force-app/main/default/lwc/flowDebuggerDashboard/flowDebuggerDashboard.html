@@ -115,7 +115,7 @@
     <!-- Main Data Table -->
     <template if:false={isLoading}>
       <div class="table-container">
-        <!-- Expand/Collapse All Toolbar -->
+        <!-- Table Toolbar -->
         <div class="table-toolbar">
           <div class="toolbar-left">
             <button class="toolbar-btn" onclick={handleToggleExpandAll}>
@@ -125,6 +125,13 @@
             <span class="toolbar-count">{errorCountLabel}</span>
           </div>
           <div class="toolbar-right">
+            <template if:false={isEditMode}>
+              <lightning-button label="Edit" icon-name="utility:edit" onclick={handleEnterEditMode} variant="neutral" class="slds-var-m-right_x-small"></lightning-button>
+            </template>
+            <template if:true={isEditMode}>
+              <lightning-button label="Cancel" onclick={handleCancelEdit} variant="neutral" class="slds-var-m-right_x-small"></lightning-button>
+              <lightning-button label="Save" icon-name="utility:save" onclick={handleSaveEdits} variant="brand" disabled={isSaveDisabled} class="slds-var-m-right_x-small"></lightning-button>
+            </template>
             <lightning-button label="Export CSV" icon-name="utility:download" onclick={handleExportPDF} variant="neutral" class="toolbar-export-btn"></lightning-button>
           </div>
         </div>
@@ -132,22 +139,35 @@
         <table class="data-table">
           <thead>
             <tr>
+              <template if:true={isEditMode}>
+                <th style="width: 36px;">
+                  <div>
+                    <lightning-input type="checkbox" label="" variant="label-hidden" checked={isAllSelected} onchange={handleSelectAll}></lightning-input>
+                  </div>
+                </th>
+              </template>
               <th style="width: 36px;"><div></div></th>
-              <th style="width: 18%;"><div>Flow Name</div></th>
+              <th><div>Flow Name</div></th>
               <th style="width: 7%;"><div>Errors (24h)</div></th>
-              <th style="width: 13%;"><div>Status</div></th>
-              <th style="width: 13%;"><div>Owner</div></th>
-              <th style="width: 18%;"><div>Latest Error</div></th>
+              <th style="width: 12%;"><div>Status</div></th>
+              <th style="width: 14%;"><div>Owner</div></th>
+              <th><div>Latest Error</div></th>
               <th style="width: 7%;"><div>Severity</div></th>
               <th style="width: 7%;"><div>AI Analysis</div></th>
-              <th style="width: 13%;"><div>Actions</div></th>
+              <th style="width: 10%;"><div>Actions</div></th>
             </tr>
           </thead>
           <tbody>
             <template for:each={formattedErrors} for:item="error">
               <!-- Main Row -->
               <tr key={error.id} class="data-row" data-is-critical={error.isCritical}>
-                <!-- Chevron (FIRST column) -->
+                <!-- Checkbox (edit mode only) -->
+                <template if:true={isEditMode}>
+                  <td class="checkbox-cell">
+                    <lightning-input type="checkbox" label="" variant="label-hidden" checked={error.isSelected} data-error-id={error.id} onchange={handleRowSelect}></lightning-input>
+                  </td>
+                </template>
+                <!-- Chevron -->
                 <td class="chevron-cell">
                   <button class="chevron-btn" onclick={handleRowToggle} data-error-id={error.id} title="Expand/Collapse">
                     <lightning-icon icon-name={error.chevronIcon} size="xx-small"></lightning-icon>
@@ -164,34 +184,47 @@
                 <td>
                   <span class="count-pill" data-count={error.errorCount}>{error.errorCount}</span>
                 </td>
+                <!-- Status Column -->
                 <td>
-                  <div class="inline-combobox">
-                    <lightning-combobox
-                      name="status"
-                      label=""
-                      value={error.status}
-                      options={statusOptions}
-                      onchange={handleStatusChange}
-                      data-error-id={error.id}
-                      variant="label-hidden"
-                      dropdown-alignment="auto"
-                    ></lightning-combobox>
-                  </div>
+                  <template if:true={error.isEditable}>
+                    <div class="inline-combobox">
+                      <lightning-combobox
+                        name="status"
+                        label=""
+                        value={error.status}
+                        options={statusOptions}
+                        onchange={handleStatusChange}
+                        data-error-id={error.id}
+                        variant="label-hidden"
+                        dropdown-alignment="auto"
+                      ></lightning-combobox>
+                    </div>
+                  </template>
+                  <template if:false={error.isEditable}>
+                    <span class="status-tag" data-status={error.status}>{error.status}</span>
+                  </template>
                 </td>
+                <!-- Owner Column -->
                 <td>
-                  <div class="inline-combobox">
-                    <lightning-combobox
-                      name="owner"
-                      label=""
-                      value={error.ownerId}
-                      options={userOptions}
-                      onchange={handleOwnerChange}
-                      data-error-id={error.id}
-                      variant="label-hidden"
-                      dropdown-alignment="auto"
-                      placeholder="Unassigned"
-                    ></lightning-combobox>
-                  </div>
+                  <template if:true={error.isEditable}>
+                    <div class="inline-lookup">
+                      <lightning-record-picker
+                        label=""
+                        variant="label-hidden"
+                        object-api-name="User"
+                        value={error.ownerId}
+                        onchange={handleOwnerChange}
+                        data-error-id={error.id}
+                        placeholder="Search users..."
+                        matching-info={userMatchingInfo}
+                        display-info={userDisplayInfo}
+                        filter={userFilter}
+                      ></lightning-record-picker>
+                    </div>
+                  </template>
+                  <template if:false={error.isEditable}>
+                    <span class="owner-name">{error.ownerDisplayName}</span>
+                  </template>
                 </td>
                 <td>
                   <span class="truncated-text" title={error.latestErrorMessage}>{error.truncatedMessage}</span>
@@ -223,7 +256,7 @@
               <!-- Expandable Detail Panel -->
               <template if:true={error.showDetail}>
                 <tr key={error.detailKey} class="detail-row">
-                  <td colspan="9" class="detail-cell">
+                  <td colspan={detailColspan} class="detail-cell">
                     <div class="detail-panel">
                       <!-- Detail Header Bar -->
                       <div class="detail-header-bar">
@@ -254,7 +287,6 @@
                       <div class="detail-body">
                         <div class="slds-grid slds-gutters slds-wrap">
                           <div class="slds-col slds-size_12-of-12 slds-large-size_6-of-12">
-                            <!-- Full Error Message -->
                             <div class="detail-card">
                               <div class="detail-card-header">
                                 <lightning-icon icon-name="utility:error" size="xx-small" class="detail-card-icon"></lightning-icon>
@@ -264,8 +296,6 @@
                                 <code class="error-code-block">{error.latestErrorMessage}</code>
                               </div>
                             </div>
-
-                            <!-- Root Cause -->
                             <div class="detail-card">
                               <div class="detail-card-header">
                                 <lightning-icon icon-name="utility:bug" size="xx-small" class="detail-card-icon"></lightning-icon>
@@ -275,8 +305,6 @@
                                 <p>{error.rootCause}</p>
                               </div>
                             </div>
-
-                            <!-- Immediate Action -->
                             <div class="detail-card detail-card-warning">
                               <div class="detail-card-header">
                                 <lightning-icon icon-name="utility:warning" size="xx-small" class="detail-card-icon"></lightning-icon>
@@ -287,9 +315,7 @@
                               </div>
                             </div>
                           </div>
-
                           <div class="slds-col slds-size_12-of-12 slds-large-size_6-of-12">
-                            <!-- Fix Steps -->
                             <div class="detail-card">
                               <div class="detail-card-header">
                                 <lightning-icon icon-name="utility:steps" size="xx-small" class="detail-card-icon"></lightning-icon>
@@ -308,8 +334,6 @@
                                 </template>
                               </div>
                             </div>
-
-                            <!-- Confidence Score -->
                             <div class="detail-card">
                               <div class="detail-card-header">
                                 <lightning-icon icon-name="utility:metrics" size="xx-small" class="detail-card-icon"></lightning-icon>
@@ -335,7 +359,7 @@
             <!-- Empty State -->
             <template if:true={isEmptyState}>
               <tr>
-                <td colspan="9">
+                <td colspan={detailColspan}>
                   <div class="empty-state">
                     <div class="empty-state-circle">
                       <lightning-icon icon-name="utility:check" size="large" class="empty-state-icon"></lightning-icon>
@@ -356,7 +380,7 @@
       <div class="metrics-header" onclick={toggleMetrics}>
         <span class="metrics-title">
           <lightning-icon icon-name="utility:chart" size="small"></lightning-icon>
-          Metrics & Analytics
+          Metrics &amp; Analytics
         </span>
         <lightning-icon icon-name={metricsChevronIcon} size="small"></lightning-icon>
       </div>
@@ -399,6 +423,70 @@
     </div>
   </div>
 
+  <!-- AI Analysis Loading Modal -->
+  <template if:true={isAnalyzing}>
+    <div class="analysis-overlay">
+      <div class="analysis-modal">
+        <div class="analysis-animation">
+          <div class="einstein-float">
+            <lightning-icon icon-name="utility:einstein" size="large"></lightning-icon>
+          </div>
+          <div class="loading-dots">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+        </div>
+        <h2 class="analysis-modal-title">{loadingMessage}</h2>
+        <p class="analysis-modal-sub">{loadingSubMessage}</p>
+        <div class="analysis-progress-wrap">
+          <lightning-progress-bar value={analysisProgress} variant="circular"></lightning-progress-bar>
+        </div>
+        <div class="analysis-tip">
+          <lightning-icon icon-name="utility:info" size="x-small"></lightning-icon>
+          <span><strong>Did you know?</strong> {funTip}</span>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Save Confirmation Modal -->
+  <template if:true={showConfirmModal}>
+    <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open">
+      <div class="slds-modal__container">
+        <header class="slds-modal__header">
+          <button class="slds-button slds-button_icon slds-modal__close slds-button_icon-inverse" onclick={handleCancelConfirm}>
+            <lightning-icon icon-name="utility:close" alternative-text="Close" size="small"></lightning-icon>
+          </button>
+          <h2 class="slds-modal__title">Confirm Changes</h2>
+        </header>
+        <div class="slds-modal__content slds-p-around_medium">
+          <p>Are you sure you want to save changes to <strong>{pendingChangeCount}</strong> error record(s)?</p>
+          <template if:true={hasPendingChanges}>
+            <div class="confirm-changes-list slds-var-m-top_small">
+              <template for:each={pendingChangesSummary} for:item="change">
+                <div key={change.id} class="confirm-change-item">
+                  <strong>{change.flowName}</strong>
+                  <template if:true={change.statusChanged}>
+                    <span class="change-detail">Status: {change.oldStatus} &rarr; {change.newStatus}</span>
+                  </template>
+                  <template if:true={change.ownerChanged}>
+                    <span class="change-detail">Owner updated</span>
+                  </template>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <footer class="slds-modal__footer">
+          <lightning-button label="Cancel" onclick={handleCancelConfirm} class="slds-var-m-right_x-small"></lightning-button>
+          <lightning-button label="Save Changes" variant="brand" onclick={handleConfirmSave}></lightning-button>
+        </footer>
+      </div>
+    </section>
+    <div class="slds-backdrop slds-backdrop_open"></div>
+  </template>
+
   <!-- Help Modal -->
   <template if:true={showHelpModal}>
     <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open slds-modal_large">
@@ -413,7 +501,6 @@
           </h2>
         </header>
         <div class="slds-modal__content slds-p-around_large">
-          <!-- Flow Diagram -->
           <div class="slds-var-m-bottom_large">
             <h3 class="guide-heading">
               <lightning-icon icon-name="utility:flow" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
@@ -435,7 +522,7 @@
               <div class="pipeline-step">
                 <span class="pipeline-num">3</span>
                 <strong>Einstein Analyzes</strong>
-                <span>ConnectApi.EinsteinLLM</span>
+                <span>Prompt Template</span>
               </div>
               <span class="pipeline-arrow">&#8594;</span>
               <div class="pipeline-step">
@@ -446,8 +533,6 @@
             </div>
           </div>
           <hr class="slds-var-m-vertical_medium" />
-
-          <!-- Steps -->
           <div class="slds-box guide-step slds-var-m-bottom_medium">
             <h3 class="slds-text-heading_small slds-var-m-bottom_small">
               <span class="step-circle">1</span> Error Detection
@@ -459,17 +544,15 @@
             <h3 class="slds-text-heading_small slds-var-m-bottom_small">
               <span class="step-circle">2</span> Einstein AI Analysis
             </h3>
-            <p>Powered by <strong>Salesforce Einstein LLM</strong> via <code>ConnectApi.EinsteinLLM.generateMessages()</code>.</p>
+            <p>Powered by <strong>FlowErrorDebugger Prompt Template</strong> via <code>ConnectApi.EinsteinLLM.generateMessagesForPromptTemplate()</code>. Select your preferred AI model in Prompt Builder.</p>
             <p class="slds-var-m-top_x-small"><strong>Automatic:</strong> Real-time monitoring ON triggers analysis. <strong>Manual:</strong> Click "AI Analysis" button on any row.</p>
           </div>
           <div class="slds-box guide-step slds-var-m-bottom_medium">
             <h3 class="slds-text-heading_small slds-var-m-bottom_small">
-              <span class="step-circle">3</span> Review & Resolve
+              <span class="step-circle">3</span> Review &amp; Resolve
             </h3>
-            <p>Click the <strong>chevron</strong> to expand analysis details. Use <strong>"Mark Resolved"</strong> to close errors. Export results as PDF.</p>
+            <p>Click the <strong>chevron</strong> to expand analysis details. Use <strong>Edit</strong> mode to update Status and Owner columns, then save changes. Export results as CSV.</p>
           </div>
-
-          <!-- Confidence Score Table -->
           <div class="slds-box slds-var-m-bottom_medium guide-info-box">
             <h3 class="slds-text-heading_small slds-var-m-bottom_small">
               <lightning-icon icon-name="utility:metrics" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
@@ -486,8 +569,6 @@
               </tbody>
             </table>
           </div>
-
-          <!-- Severity Table -->
           <div class="slds-box slds-var-m-bottom_medium guide-info-box">
             <h3 class="slds-text-heading_small slds-var-m-bottom_small">
               <lightning-icon icon-name="utility:warning" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
@@ -503,8 +584,6 @@
               </tbody>
             </table>
           </div>
-
-          <!-- Tips -->
           <div class="slds-box guide-warn-box">
             <h3 class="slds-text-heading_small slds-var-m-bottom_small">
               <lightning-icon icon-name="utility:warning" size="x-small" class="slds-var-m-right_x-small"></lightning-icon>
@@ -512,7 +591,7 @@
             </h3>
             <ul class="slds-list_dotted slds-text-body_small">
               <li><strong>No errors?</strong> Enable real-time monitoring or run Ad-Hoc Analysis.</li>
-              <li><strong>AI not working?</strong> Check Einstein LLM config and permission set.</li>
+              <li><strong>AI not working?</strong> Ensure FlowErrorDebugger prompt template is published in Prompt Builder.</li>
               <li><strong>Score is 20%?</strong> Einstein was unavailable; fallback analysis ran.</li>
               <li><strong>Stale data?</strong> Click refresh to reload.</li>
             </ul>

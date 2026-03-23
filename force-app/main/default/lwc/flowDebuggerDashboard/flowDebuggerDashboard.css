@@ -821,3 +821,91 @@
   .row-actions { flex-direction: column; gap: 4px; }
   .detail-header-bar { gap: 10px; }
 }
+
+/* ---- CHECKBOX CELL ---- */
+.checkbox-cell { text-align: center; padding: 8px 4px !important; width: 36px; }
+
+/* ---- INLINE LOOKUP ---- */
+.inline-lookup { max-width: 180px; }
+
+/* ---- OWNER NAME (read-only) ---- */
+.owner-name {
+  font-size: 12px;
+  color: var(--c-text);
+  font-weight: 500;
+}
+
+/* ---- ANALYSIS OVERLAY MODAL ---- */
+.analysis-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.analysis-modal {
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+  width: 500px;
+  max-width: 90%;
+  text-align: center;
+}
+
+.analysis-modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--c-primary-dark);
+  margin: 1.5rem 0 0.25rem;
+}
+
+.analysis-modal-sub {
+  font-size: 13px;
+  color: var(--c-text2);
+  margin: 0 0 1rem;
+}
+
+.analysis-progress-wrap { margin: 0 1rem 1.5rem; }
+
+.analysis-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  background: #f3f9fc;
+  border-left: 3px solid var(--c-primary);
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--c-text);
+}
+
+/* ---- CONFIRM MODAL ---- */
+.confirm-changes-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.confirm-change-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 13px;
+}
+
+.confirm-change-item:last-child { border-bottom: none; }
+
+.change-detail {
+  font-size: 12px;
+  color: var(--c-text2);
+  padding-left: 8px;
+}

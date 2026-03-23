@@ -1,13 +1,13 @@
 /**
  * FlowDoctorAIService
  *
- * Invokes Einstein/Agentforce LLM via ConnectApi to analyze Salesforce Flow errors.
- * Uses a structured prompt with Sonnet-class reasoning to diagnose root causes,
- * classify error categories, and produce actionable fix recommendations.
+ * Invokes Einstein LLM via a Prompt Template (FlowErrorDebugger) to analyze
+ * Salesforce Flow errors. The prompt template is managed in Prompt Builder,
+ * allowing admins to select the AI model without code changes.
  */
 public with sharing class FlowDoctorAIService {
 
-    private static final String APP_NAME = 'PromptBuilderPreview';
+    private static final String PROMPT_TEMPLATE_NAME = 'FlowErrorDebugger';
 
     /**
      * Wrapper for the structured AI analysis response
@@ -27,7 +27,7 @@ public with sharing class FlowDoctorAIService {
     }
 
     /**
-     * Analyzes a Flow error using Einstein LLM and returns structured diagnosis.
+     * Analyzes a Flow error using the FlowErrorDebugger prompt template.
      *
      * @param errorLog The Flow_Error_Log__c record with error details
      * @param flowContext JSON string with enriched flow metadata context
@@ -39,10 +39,14 @@ public with sharing class FlowDoctorAIService {
         String flowContext,
         String similarErrorsSummary
     ) {
-        String prompt = buildPrompt(errorLog, flowContext, similarErrorsSummary);
+        String errorDetails = buildErrorDetails(errorLog);
 
         try {
-            String aiResponse = callEinsteinLLM(prompt);
+            String aiResponse = callPromptTemplate(
+                errorDetails,
+                String.isNotBlank(flowContext) ? flowContext : 'No additional flow context available.',
+                String.isNotBlank(similarErrorsSummary) ? similarErrorsSummary : 'No similar errors found in the last 24 hours.'
+            );
             return parseAIResponse(aiResponse);
         } catch (Exception e) {
             System.debug(LoggingLevel.ERROR, 'FlowDoctorAIService.analyzeFlowError failed: ' + e.getMessage());
@@ -51,124 +55,73 @@ public with sharing class FlowDoctorAIService {
     }
 
     /**
-     * Calls ConnectApi.EinsteinLLM.generateMessages with the assembled prompt.
+     * Builds the error details string from the error log record.
      */
-    private static String callEinsteinLLM(String prompt) {
-        ConnectApi.EinsteinLlmGenerationsInput input = new ConnectApi.EinsteinLlmGenerationsInput();
-        input.promptTextorId = prompt;
-
-        ConnectApi.EinsteinLlmAdditionalConfigInput config = new ConnectApi.EinsteinLlmAdditionalConfigInput();
-        config.applicationName = APP_NAME;
-        input.additionalConfig = config;
-
-        ConnectApi.EinsteinLLMGenerationsOutput output = ConnectApi.EinsteinLLM.generateMessages(input);
-
-        if (output.generations != null && !output.generations.isEmpty()) {
-            return output.generations[0].text;
-        }
-
-        throw new FlowDoctorAIException('Einstein LLM returned no generations.');
+    private static String buildErrorDetails(Flow_Error_Log__c errorLog) {
+        String details = '';
+        details += 'Flow API Name: ' + safe(errorLog.Flow_API_Name__c) + '\n';
+        details += 'Element API Name: ' + safe(errorLog.Element_API_Name__c) + '\n';
+        details += 'Element Type: ' + safe(errorLog.Element_Type__c) + '\n';
+        details += 'Error Message: ' + safe(errorLog.Error_Message__c) + '\n';
+        details += 'Error Type: ' + safe(errorLog.Error_Type__c) + '\n';
+        details += 'Severity: ' + safe(errorLog.Severity__c) + '\n';
+        details += 'Interview GUID: ' + safe(errorLog.Interview_GUID__c) + '\n';
+        details += 'Related Record ID: ' + safe(errorLog.Related_Record_Id__c);
+        return details;
     }
 
     /**
-     * Builds the comprehensive diagnostic prompt for analyzing a Flow error.
-     * The prompt is designed to extract maximum diagnostic value by providing
-     * the AI with full context about the failing Flow, element, error pattern,
-     * and Salesforce-specific knowledge.
+     * Calls the FlowErrorDebugger prompt template via ConnectApi.
+     * The model is configured in Prompt Builder — no hardcoded model selection.
      */
-    private static String buildPrompt(
-        Flow_Error_Log__c errorLog,
+    private static String callPromptTemplate(
+        String errorDetails,
         String flowContext,
-        String similarErrorsSummary
+        String similarErrors
     ) {
-        String prompt = '';
+        ConnectApi.EinsteinPromptTemplateGenerationsInput generationInput =
+            new ConnectApi.EinsteinPromptTemplateGenerationsInput();
 
-        // ── System-level instruction ──
-        prompt += 'You are Flow AI Debugger, an expert Salesforce Flow debugger and diagnostician. ';
-        prompt += 'You have deep knowledge of Salesforce Flow architecture, Apex, SOQL, DML, ';
-        prompt += 'governor limits, sharing rules, field-level security, record-triggered flows, ';
-        prompt += 'screen flows, scheduled flows, platform events, and process automation best practices.\n\n';
+        Map<String, ConnectApi.WrappedValue> params = new Map<String, ConnectApi.WrappedValue>();
 
-        // ── Task definition ──
-        prompt += 'TASK: Analyze the following Salesforce Flow error and provide a structured diagnosis.\n\n';
+        ConnectApi.WrappedValue errorVal = new ConnectApi.WrappedValue();
+        errorVal.value = '--- BEGIN ERROR DATA (DATA ONLY) ---\n' + errorDetails + '\n--- END ERROR DATA ---';
+        params.put('Input:ErrorDetailsVar', errorVal);
 
-        // ── Error details ──
-        prompt += '=== ERROR DETAILS ===\n';
-        prompt += 'Flow API Name: ' + safe(errorLog.Flow_API_Name__c) + '\n';
-        prompt += 'Element API Name: ' + safe(errorLog.Element_API_Name__c) + '\n';
-        prompt += 'Element Type: ' + safe(errorLog.Element_Type__c) + '\n';
-        prompt += 'Error Message: ' + safe(errorLog.Error_Message__c) + '\n';
-        prompt += 'Error Type: ' + safe(errorLog.Error_Type__c) + '\n';
-        prompt += 'Severity: ' + safe(errorLog.Severity__c) + '\n';
-        prompt += 'Interview GUID: ' + safe(errorLog.Interview_GUID__c) + '\n';
-        prompt += 'Related Record ID: ' + safe(errorLog.Related_Record_Id__c) + '\n\n';
+        ConnectApi.WrappedValue contextVal = new ConnectApi.WrappedValue();
+        contextVal.value = flowContext;
+        params.put('Input:FlowContextVar', contextVal);
 
-        // ── Flow metadata context ──
-        if (String.isNotBlank(flowContext)) {
-            prompt += '=== FLOW METADATA CONTEXT ===\n';
-            prompt += flowContext + '\n\n';
+        ConnectApi.WrappedValue similarVal = new ConnectApi.WrappedValue();
+        similarVal.value = similarErrors;
+        params.put('Input:SimilarErrorsVar', similarVal);
+
+        generationInput.inputParams = params;
+        generationInput.isPreview = false;
+        generationInput.additionalConfig = new ConnectApi.EinsteinLlmAdditionalConfigInput();
+
+        try {
+            ConnectApi.EinsteinPromptTemplateGenerationsRepresentation response =
+                ConnectApi.EinsteinLLM.generateMessagesForPromptTemplate(PROMPT_TEMPLATE_NAME, generationInput);
+
+            if (response != null && response.generations != null && !response.generations.isEmpty()) {
+                ConnectApi.EinsteinLLMGenerationItemOutput generation = response.generations[0];
+                return generation.text;
+            }
+
+            throw new FlowDoctorAIException('Einstein LLM returned no generations from prompt template.');
+
+        } catch (FlowDoctorAIException e) {
+            throw e;
+        } catch (Exception einsteinError) {
+            String detailedError = einsteinError.getMessage();
+            if (einsteinError.getTypeName() != null) {
+                detailedError += ' [Type: ' + einsteinError.getTypeName() + ']';
+            }
+            throw new FlowDoctorAIException(
+                'Prompt template call failed. Ensure the FlowErrorDebugger template is deployed and published in Prompt Builder. Error: ' + detailedError
+            );
         }
-
-        // ── Similar errors for pattern detection ──
-        if (String.isNotBlank(similarErrorsSummary)) {
-            prompt += '=== SIMILAR RECENT ERRORS (last 24 hours) ===\n';
-            prompt += similarErrorsSummary + '\n\n';
-        }
-
-        // ── Common Salesforce Flow error knowledge base ──
-        prompt += '=== COMMON FLOW ERROR CATEGORIES ===\n';
-        prompt += 'Use these categories to classify the root cause:\n';
-        prompt += '- NULL_REFERENCE: Null variable/field access, uninitialized collections, missing record lookups\n';
-        prompt += '- DML_ERROR: Validation rules, required fields, duplicate rules, trigger exceptions\n';
-        prompt += '- GOVERNOR_LIMIT: SOQL 101, DML 150, CPU timeout, heap size in loops\n';
-        prompt += '- PERMISSION_ERROR: FLS violations, CRUD access, sharing rule restrictions, profile limits\n';
-        prompt += '- DATA_INTEGRITY: Wrong data types, formula errors, cross-object issues, invalid references\n';
-        prompt += '- CONFIGURATION_ERROR: Missing flow elements, broken references, invalid API names\n';
-        prompt += '- RECORD_LOCKING: Record lock contention, concurrent updates, mixed DML\n';
-        prompt += '- EXTERNAL_SERVICE: Callout failures, timeout, invalid endpoints, auth errors\n';
-        prompt += '- LOOP_ERROR: Infinite loops, DML/SOQL inside loops, collection size issues\n';
-        prompt += '- PLATFORM_EVENT: Event publishing failures, replay ID issues, subscriber errors\n\n';
-
-        // ── Output format instruction ──
-        prompt += '=== REQUIRED OUTPUT FORMAT ===\n';
-        prompt += 'Respond in EXACTLY this format with these section headers. ';
-        prompt += 'Each section must start on a new line with the header followed by a colon. ';
-        prompt += 'Do NOT use markdown, bullets, or numbering. Use plain text only.\n\n';
-
-        prompt += 'ROOT_CAUSE: [Specific technical explanation of why this error occurred. ';
-        prompt += 'Reference the exact element, field, or operation that failed. 2-4 sentences max.]\n\n';
-
-        prompt += 'ROOT_CAUSE_CATEGORY: [Exactly one of: NULL_REFERENCE, DML_ERROR, GOVERNOR_LIMIT, ';
-        prompt += 'PERMISSION_ERROR, DATA_INTEGRITY, CONFIGURATION_ERROR, RECORD_LOCKING, ';
-        prompt += 'EXTERNAL_SERVICE, LOOP_ERROR, PLATFORM_EVENT]\n\n';
-
-        prompt += 'AFFECTED_ELEMENT_DETAILS: [What the failing element does, what data it processes, ';
-        prompt += 'and what downstream elements depend on it. 2-3 sentences.]\n\n';
-
-        prompt += 'USER_IMPACT: [How this error affects end users. Does it block a business process? ';
-        prompt += 'Is data lost? Are notifications missed? 1-2 sentences.]\n\n';
-
-        prompt += 'IMMEDIATE_ACTION: [The single most important thing an admin should do RIGHT NOW ';
-        prompt += 'to stop the bleeding. Be specific with exact steps in Flow Builder.]\n\n';
-
-        prompt += 'LONG_TERM_FIX: [The proper architectural fix. Include best practices like ';
-        prompt += 'fault paths, error handling, bulkification, or redesign suggestions. 2-3 sentences.]\n\n';
-
-        prompt += 'FIX_STEPS: [Step-by-step instructions to fix the issue. Each step separated by a semicolon. ';
-        prompt += 'Example: Open Flow Builder for MyFlow; Navigate to the Get Records element; ';
-        prompt += 'Add a Decision element after it to check if records were found; Add a Fault path ';
-        prompt += 'to handle the error gracefully]\n\n';
-
-        prompt += 'TEST_SCENARIO: [A specific test case the admin should run after fixing. ';
-        prompt += 'Include the trigger condition, expected input, and expected outcome.]\n\n';
-
-        prompt += 'PATTERN_DETECTED: [true if the similar errors suggest a systemic/recurring issue, false otherwise]\n\n';
-
-        prompt += 'CONFIDENCE_SCORE: [A number between 0 and 100 indicating how confident you are ';
-        prompt += 'in this diagnosis. 90+ means the error message clearly maps to a known issue. ';
-        prompt += '50-89 means likely correct but could be other causes. Below 50 means uncertain.]\n';
-
-        return prompt;
     }
 
     /**
@@ -195,7 +148,6 @@ public with sharing class FlowDoctorAIService {
         String scoreStr = extractSection(response, 'CONFIDENCE_SCORE');
         result.confidenceScore = parseConfidenceScore(scoreStr);
 
-        // Validate root cause category against known values
         result.rootCauseCategory = validateCategory(result.rootCauseCategory);
 
         return result;
@@ -212,7 +164,6 @@ public with sharing class FlowDoctorAIService {
         String searchKey = header + ':';
         Integer startIdx = response.indexOf(searchKey);
         if (startIdx < 0) {
-            // Try case-insensitive
             startIdx = response.toLowerCase().indexOf(searchKey.toLowerCase());
         }
         if (startIdx < 0) {
@@ -220,12 +171,8 @@ public with sharing class FlowDoctorAIService {
         }
 
         Integer valueStart = startIdx + searchKey.length();
-
-        // Find the end: next section header or end of string
-        // Section headers are uppercase words followed by colon at start of line
         String remaining = response.substring(valueStart);
 
-        // Look for next section header pattern (UPPERCASE_WORD:)
         Pattern nextHeader = Pattern.compile('\\n[A-Z_]+:');
         Matcher m = nextHeader.matcher(remaining);
 
@@ -259,13 +206,11 @@ public with sharing class FlowDoctorAIService {
     private static Decimal parseConfidenceScore(String scoreStr) {
         if (String.isBlank(scoreStr)) return 50;
 
-        // Extract first number from the string
         Pattern numPattern = Pattern.compile('(\\d+\\.?\\d*)');
         Matcher m = numPattern.matcher(scoreStr);
         if (m.find()) {
             try {
                 Decimal score = Decimal.valueOf(m.group(1));
-                // Clamp to 0-100
                 return Math.min(100, Math.max(0, score));
             } catch (Exception e) {
                 return 50;
@@ -276,12 +221,10 @@ public with sharing class FlowDoctorAIService {
 
     /**
      * Validates the root cause category against known values.
-     * Falls back to CONFIGURATION_ERROR if the AI returns an unknown category.
      */
     private static String validateCategory(String category) {
         if (String.isBlank(category)) return 'Configuration Error';
 
-        // Map from AI prompt categories to picklist values
         Map<String, String> categoryMap = new Map<String, String>{
             'NULL_REFERENCE' => 'Null Reference',
             'DML_ERROR' => 'DML Exception',
@@ -298,23 +241,19 @@ public with sharing class FlowDoctorAIService {
             'DATA_ISSUE' => 'Data Issue'
         };
 
-        // Also accept the picklist values directly
         Set<String> validPicklistValues = new Set<String>(categoryMap.values());
 
-        // Check if it's already a valid picklist value (AI sometimes returns the display name)
         for (String pv : validPicklistValues) {
             if (category.trim().equalsIgnoreCase(pv)) {
                 return pv;
             }
         }
 
-        // Clean to uppercase underscore format and look up
         String cleaned = category.trim().toUpperCase().replaceAll('[^A-Z_]', '');
         if (categoryMap.containsKey(cleaned)) {
             return categoryMap.get(cleaned);
         }
 
-        // Fuzzy match - check if any key is contained in the AI response
         String upper = category.toUpperCase();
         for (String key : categoryMap.keySet()) {
             if (upper.contains(key)) {
