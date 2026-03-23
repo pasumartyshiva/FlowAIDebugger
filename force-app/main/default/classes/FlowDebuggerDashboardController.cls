@@ -325,14 +325,13 @@ public with sharing class FlowDebuggerDashboardController {
         }
 
         // Get flow labels from FlowDefinitionView
-        Set<String> flowDevNames = new Set<String>();
-        // Parse flow developer name from interview label (format: "FlowLabel DateTime")
-        // We'll match by querying all active flow definitions
+        // FlowDefinitionView does not support queryMore(), so we must use LIMIT
         Map<String, String> flowLabelMap = new Map<String, String>();
         for (FlowDefinitionView fdv : [
             SELECT ApiName, Label
             FROM FlowDefinitionView
             WHERE IsActive = true
+            LIMIT 2000
         ]) {
             flowLabelMap.put(fdv.ApiName, fdv.Label);
         }
