@@ -10,6 +10,7 @@ import getErrorAnalysis from '@salesforce/apex/FlowDoctorController.getErrorAnal
 import markErrorResolved from '@salesforce/apex/FlowDoctorController.markErrorResolved';
 import updateErrorStatus from '@salesforce/apex/FlowDoctorController.updateErrorStatus';
 import updateErrorOwner from '@salesforce/apex/FlowDoctorController.updateErrorOwner';
+import getActiveUsers from '@salesforce/apex/FlowDoctorController.getActiveUsers';
 
 const SEVERITY_OPTIONS = [
   { label: 'All', value: 'All' },
@@ -25,6 +26,13 @@ const STATUS_OPTIONS = [
   { label: 'In Progress', value: 'In Progress' },
   { label: 'Resolved', value: 'Resolved' },
   { label: 'Ignored', value: 'Ignored' }
+];
+
+const PAGE_SIZE_OPTIONS = [
+  { label: '5', value: '5' },
+  { label: '10', value: '10' },
+  { label: '25', value: '25' },
+  { label: '50', value: '50' }
 ];
 
 const MESSAGE_TRUNCATE_LENGTH = 60;
@@ -81,8 +89,8 @@ const SAMPLE_ERRORS = [
     latestErrorMessage: 'INSUFFICIENT_ACCESS_OR_READONLY: insufficient access rights on cross-reference id: 006Dn000007kABC',
     severity: 'Medium', isCritical: false, isAnalyzed: true,
     rootCause: 'The flow runs in system context but references related records that the running user does not have access to.',
-    immediateAction: 'Review the sharing settings for the Opportunity and related Account objects. Consider running the flow in System Mode Without Sharing.',
-    fixSteps: ['Check the flow\'s Run Mode setting (currently User Mode)', 'Change to System Mode if business logic requires cross-object updates', 'Alternatively, update the permission set to grant Edit access on Account', 'Test with a user who has the minimum required permissions'],
+    immediateAction: 'Review the sharing settings for the Opportunity and related Account objects.',
+    fixSteps: ['Check the flow\'s Run Mode setting', 'Change to System Mode if business logic requires cross-object updates', 'Alternatively, update the permission set to grant Edit access on Account', 'Test with a user who has the minimum required permissions'],
     confidenceScore: 78
   },
   {
@@ -91,8 +99,8 @@ const SAMPLE_ERRORS = [
     latestErrorMessage: 'LIMIT_EXCEEDED: Too many SOQL queries: 101. The flow exceeded the governor limit for SOQL queries in a single transaction.',
     severity: 'Critical', isCritical: true, isAnalyzed: true,
     rootCause: 'The Invoice PDF Generator flow contains a Loop element that executes a Get Records element inside each iteration.',
-    immediateAction: 'Move the Get Records element outside the Loop. Collect all needed data before entering the loop using a single bulkified query.',
-    fixSteps: ['Identify the Get Records element inside the Loop (Get_Line_Item_Details)', 'Move it before the Loop element', 'Store results in a Collection variable', 'Inside the loop, filter the collection instead of querying', 'Use an Assignment element with collection filters', 'Test with invoices containing 50+ line items'],
+    immediateAction: 'Move the Get Records element outside the Loop. Collect all needed data before entering the loop.',
+    fixSteps: ['Identify the Get Records element inside the Loop', 'Move it before the Loop element', 'Store results in a Collection variable', 'Inside the loop, filter the collection instead of querying', 'Test with invoices containing 50+ line items'],
     confidenceScore: 95
   },
   {
@@ -106,11 +114,11 @@ const SAMPLE_ERRORS = [
   {
     id: 'sample_006', flowName: 'Account_Territory_Assignment', errorCount: 5,
     status: 'Analyzed', ownerId: '', ownerName: '',
-    latestErrorMessage: 'MIXED_DML_OPERATION: DML operation on setup object is not permitted after you have updated a non-setup object (or vice versa).',
+    latestErrorMessage: 'MIXED_DML_OPERATION: DML operation on setup object is not permitted after you have updated a non-setup object.',
     severity: 'High', isCritical: false, isAnalyzed: true,
-    rootCause: 'The flow updates both a custom object (Territory_Assignment__c) and a User record in the same transaction.',
-    immediateAction: 'Separate the User update into a future method or a Platform Event-triggered flow to run in a different transaction context.',
-    fixSteps: ['Split the flow into two flows', 'Flow 1: Update Territory_Assignment__c (non-setup)', 'Flow 1: Publish a Platform Event (Territory_Changed__e)', 'Flow 2: Subscribe to Territory_Changed__e and update User record', 'This ensures setup and non-setup DML happen in separate transactions'],
+    rootCause: 'The flow updates both a custom object and a User record in the same transaction.',
+    immediateAction: 'Separate the User update into a Platform Event-triggered flow.',
+    fixSteps: ['Split the flow into two flows', 'Flow 1: Update Territory_Assignment__c', 'Flow 1: Publish a Platform Event', 'Flow 2: Subscribe and update User record'],
     confidenceScore: 90
   }
 ];
@@ -135,6 +143,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
   @track aggregatedErrors = [];
   @track config = null;
   @track metricsData = null;
+  @track activeUsers = [];
 
   @track timeRange = '24h';
   @track severityFilter = 'All';
@@ -152,6 +161,10 @@ export default class FlowDebuggerDashboard extends LightningElement {
   @track pendingEdits = {};
   @track showConfirmModal = false;
 
+  // Pagination
+  @track currentPage = 1;
+  @track pageSize = '10';
+
   // Analysis loading
   @track isAnalyzing = false;
   @track loadingMessageIndex = 0;
@@ -164,14 +177,23 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
   severityOptions = SEVERITY_OPTIONS;
   statusOptions = STATUS_OPTIONS;
-
-  // lightning-record-picker config for User lookup
-  userMatchingInfo = { primaryField: { fieldPath: 'Name' } };
-  userDisplayInfo = { primaryField: 'Name', additionalFields: ['Email'] };
-  userFilter = { criteria: [{ fieldPath: 'IsActive', operator: 'eq', value: true }] };
+  pageSizeOptions = PAGE_SIZE_OPTIONS;
 
   connectedCallback() {
     this.loadData();
+  }
+
+  @wire(getActiveUsers)
+  wiredUsers({ data, error }) {
+    if (data) {
+      this.activeUsers = [{ label: 'Unassigned', value: '' }, ...data];
+    } else if (error) {
+      this.activeUsers = [{ label: 'Unassigned', value: '' }];
+    }
+  }
+
+  get userOptions() {
+    return this.activeUsers.length > 0 ? this.activeUsers : [{ label: 'Unassigned', value: '' }];
   }
 
   @wire(getDebuggerConfig)
@@ -188,6 +210,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
   loadData() {
     this.isLoading = true;
+    this.currentPage = 1;
     Promise.all([
       getAggregatedErrors({ timeRangeFilter: this.timeRange, severityFilter: this.severityFilter, searchTerm: this.searchTerm }),
       getMetricsSummary({ timeRange: this.timeRange })
@@ -244,6 +267,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
   handleRefresh() {
     this.sampleDataDismissed = false;
     this.isLoading = true;
+    this.currentPage = 1;
     Promise.all([
       refreshApex(this.wiredDashboardResult), refreshApex(this.wiredConfigResult),
       getAggregatedErrors({ timeRangeFilter: this.timeRange, severityFilter: this.severityFilter, searchTerm: this.searchTerm }),
@@ -257,6 +281,26 @@ export default class FlowDebuggerDashboard extends LightningElement {
         this.showToast('Success', 'Dashboard refreshed', 'success');
       })
       .catch(() => { this.loadSampleData(); this.isLoading = false; });
+  }
+
+  // ── Pagination ──
+  get totalPages() { return Math.max(1, Math.ceil(this.aggregatedErrors.length / parseInt(this.pageSize, 10))); }
+  get isPrevDisabled() { return this.currentPage <= 1; }
+  get isNextDisabled() { return this.currentPage >= this.totalPages; }
+  get paginationLabel() { return `Page ${this.currentPage} of ${this.totalPages} (${this.aggregatedErrors.length} total)`; }
+
+  get paginatedErrors() {
+    const size = parseInt(this.pageSize, 10);
+    const start = (this.currentPage - 1) * size;
+    const end = start + size;
+    return this.aggregatedErrors.slice(start, end);
+  }
+
+  handlePrevPage() { if (this.currentPage > 1) this.currentPage--; }
+  handleNextPage() { if (this.currentPage < this.totalPages) this.currentPage++; }
+  handlePageSizeChange(event) {
+    this.pageSize = event.detail.value;
+    this.currentPage = 1;
   }
 
   // ── Expand / Collapse ──
@@ -325,12 +369,17 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
   handleSelectAll(event) {
     const checked = event.detail.checked;
-    this.aggregatedErrors.forEach(e => { e.isSelected = checked; });
+    // Only toggle current page rows
+    const pageIds = new Set(this.paginatedErrors.map(e => e.id));
+    this.aggregatedErrors.forEach(e => {
+      if (pageIds.has(e.id)) e.isSelected = checked;
+    });
     this.aggregatedErrors = [...this.aggregatedErrors];
   }
 
   get isAllSelected() {
-    return this.aggregatedErrors.length > 0 && this.aggregatedErrors.every(e => e.isSelected);
+    const page = this.paginatedErrors;
+    return page.length > 0 && page.every(e => e.isSelected);
   }
 
   get isSaveDisabled() {
@@ -343,7 +392,6 @@ export default class FlowDebuggerDashboard extends LightningElement {
     const error = this.aggregatedErrors.find(e => e.id === errorId);
     if (!error) return;
     error.status = newStatus;
-    error.isSelected = true;
     if (!this.pendingEdits[errorId]) this.pendingEdits[errorId] = {};
     this.pendingEdits[errorId].status = newStatus;
     this.pendingEdits = { ...this.pendingEdits };
@@ -352,11 +400,13 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
   handleOwnerChange(event) {
     const errorId = event.currentTarget.dataset.errorId;
-    const newOwnerId = event.detail.recordId || '';
+    const newOwnerId = event.detail.value;
     const error = this.aggregatedErrors.find(e => e.id === errorId);
     if (!error) return;
     error.ownerId = newOwnerId;
-    error.isSelected = true;
+    // Find the user name from options
+    const userOpt = this.activeUsers.find(u => u.value === newOwnerId);
+    if (userOpt) error.ownerName = userOpt.label;
     if (!this.pendingEdits[errorId]) this.pendingEdits[errorId] = {};
     this.pendingEdits[errorId].ownerId = newOwnerId;
     this.pendingEdits = { ...this.pendingEdits };
@@ -364,7 +414,8 @@ export default class FlowDebuggerDashboard extends LightningElement {
   }
 
   handleSaveEdits() {
-    if (Object.keys(this.pendingEdits).length === 0) {
+    const editIds = Object.keys(this.pendingEdits);
+    if (editIds.length === 0) {
       this.showToast('Info', 'No changes to save', 'info');
       return;
     }
@@ -379,9 +430,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
     if (this.usingSampleData) {
       this.showToast('Success', `${editIds.length} record(s) updated (sample mode)`, 'success');
-      this.isEditMode = false;
-      this.editSnapshot = null;
-      this.pendingEdits = {};
+      this.isEditMode = false; this.editSnapshot = null; this.pendingEdits = {};
       this.aggregatedErrors.forEach(e => { e.isSelected = false; });
       this.aggregatedErrors = [...this.aggregatedErrors];
       return;
@@ -390,30 +439,21 @@ export default class FlowDebuggerDashboard extends LightningElement {
     const promises = [];
     editIds.forEach(errorId => {
       const edits = this.pendingEdits[errorId];
-      if (edits.status !== undefined) {
-        promises.push(updateErrorStatus({ errorLogId: errorId, status: edits.status }));
-      }
-      if (edits.ownerId !== undefined) {
-        promises.push(updateErrorOwner({ errorLogId: errorId, ownerId: edits.ownerId || null }));
-      }
+      if (edits.status !== undefined) promises.push(updateErrorStatus({ errorLogId: errorId, status: edits.status }));
+      if (edits.ownerId !== undefined) promises.push(updateErrorOwner({ errorLogId: errorId, ownerId: edits.ownerId || null }));
     });
 
     Promise.all(promises)
       .then(() => {
         this.showToast('Success', `${editIds.length} record(s) updated successfully`, 'success');
-        this.isEditMode = false;
-        this.editSnapshot = null;
-        this.pendingEdits = {};
+        this.isEditMode = false; this.editSnapshot = null; this.pendingEdits = {};
         this.aggregatedErrors.forEach(e => { e.isSelected = false; });
         this.aggregatedErrors = [...this.aggregatedErrors];
       })
-      .catch(err => {
-        this.handleError('Error saving changes', err);
-      });
+      .catch(err => this.handleError('Error saving changes', err));
   }
 
   get hasPendingChanges() { return Object.keys(this.pendingEdits).length > 0; }
-
   get pendingChangeCount() { return Object.keys(this.pendingEdits).length; }
 
   get pendingChangesSummary() {
@@ -440,13 +480,6 @@ export default class FlowDebuggerDashboard extends LightningElement {
     if (error) this.handleRunAnalysisForError(error);
   }
 
-  handleMarkResolvedClick(event) {
-    event.stopPropagation();
-    const errorId = event.currentTarget.dataset.errorId;
-    const error = this.aggregatedErrors.find(e => e.id === errorId);
-    if (error) this.handleMarkResolved(error);
-  }
-
   loadErrorAnalysis(error) {
     getErrorAnalysis({ errorId: error.id })
       .then(analysis => {
@@ -467,26 +500,10 @@ export default class FlowDebuggerDashboard extends LightningElement {
     runAdHocAnalysis()
       .then(() => {
         this.isLoading = false;
-        this.showToast('Analysis Started', 'Ad-hoc analysis initiated. Results will appear shortly.', 'success');
+        this.showToast('Analysis Started', 'Ad-hoc analysis initiated.', 'success');
         setTimeout(() => this.loadData(), 2000);
       })
       .catch(error => { this.isLoading = false; this.handleError('Error running analysis', error); });
-  }
-
-  handleMarkResolved(error) {
-    if (this.usingSampleData) {
-      error.status = 'Resolved';
-      this.aggregatedErrors = [...this.aggregatedErrors];
-      this.showToast('Success', 'Error marked as resolved (sample)', 'success');
-      return;
-    }
-    markErrorResolved({ errorId: error.id })
-      .then(() => {
-        error.status = 'Resolved';
-        this.aggregatedErrors = [...this.aggregatedErrors];
-        this.showToast('Success', 'Error marked as resolved', 'success');
-      })
-      .catch(err => this.handleError('Error marking as resolved', err));
   }
 
   handleRunAnalysisForError(error) {
@@ -511,10 +528,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
         }
         this.stopAnalysisAnimation();
       })
-      .catch(err => {
-        this.stopAnalysisAnimation();
-        this.handleError('Error analyzing', err);
-      });
+      .catch(err => { this.stopAnalysisAnimation(); this.handleError('Error analyzing', err); });
   }
 
   // ── Analysis Loading Animation ──
@@ -523,18 +537,13 @@ export default class FlowDebuggerDashboard extends LightningElement {
     this.loadingMessageIndex = 0;
     this.currentTipIndex = Math.floor(Math.random() * FUN_TIPS.length);
     this.loadingInterval = setInterval(() => {
-      if (this.loadingMessageIndex < LOADING_MESSAGES.length - 1) {
-        this.loadingMessageIndex++;
-      }
+      if (this.loadingMessageIndex < LOADING_MESSAGES.length - 1) this.loadingMessageIndex++;
     }, 3000);
   }
 
   stopAnalysisAnimation() {
     this.isAnalyzing = false;
-    if (this.loadingInterval) {
-      clearInterval(this.loadingInterval);
-      this.loadingInterval = null;
-    }
+    if (this.loadingInterval) { clearInterval(this.loadingInterval); this.loadingInterval = null; }
   }
 
   get loadingMessage() { return LOADING_MESSAGES[this.loadingMessageIndex].main; }
@@ -549,20 +558,17 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
     const csvRows = [];
     csvRows.push(['Flow Name', 'Errors (24h)', 'Status', 'Owner', 'Severity', 'AI Analyzed', 'Confidence Score', 'Error Message', 'Root Cause', 'Immediate Action', 'Fix Steps'].join(','));
-
     errors.forEach(err => {
-      const fixStepsText = (err.fixSteps || []).join('; ');
       csvRows.push([
         this.csvEscape(err.flowName), err.errorCount, this.csvEscape(err.status),
         this.csvEscape(err.ownerDisplayName), this.csvEscape(err.severity),
         err.isAnalyzed ? 'Yes' : 'No', err.confidenceScore + '%',
         this.csvEscape(err.latestErrorMessage), this.csvEscape(err.rootCause),
-        this.csvEscape(err.immediateAction), this.csvEscape(fixStepsText)
+        this.csvEscape(err.immediateAction), this.csvEscape((err.fixSteps || []).join('; '))
       ].join(','));
     });
 
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
@@ -582,7 +588,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
     return str;
   }
 
-  // ── Help Modal ──
+  // ── Modals ──
   handleOpenHelp() { this.showHelpModal = true; }
   handleCloseHelp() { this.showHelpModal = false; }
   toggleMetrics() { this.showMetrics = !this.showMetrics; }
@@ -629,13 +635,14 @@ export default class FlowDebuggerDashboard extends LightningElement {
   }
 
   get formattedErrors() {
-    return this.aggregatedErrors.map(error => ({
+    // Use paginated subset
+    return this.paginatedErrors.map(error => ({
       ...error,
       detailKey: error.id + '_detail',
       status: error.status || 'New',
       ownerId: error.ownerId || '',
-      ownerDisplayName: error.ownerName || (error.ownerId ? error.ownerId : 'Unassigned'),
-      isEditable: this.isEditMode && error.isSelected,
+      ownerDisplayName: error.ownerName || 'Unassigned',
+      isEditable: this.isEditMode,
       isSelected: error.isSelected || false,
       truncatedMessage: error.latestErrorMessage && error.latestErrorMessage.length > MESSAGE_TRUNCATE_LENGTH
         ? error.latestErrorMessage.substring(0, MESSAGE_TRUNCATE_LENGTH) + '...' : error.latestErrorMessage || 'No error message',

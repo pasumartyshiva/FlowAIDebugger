@@ -207,19 +207,18 @@
                 <!-- Owner Column -->
                 <td>
                   <template if:true={error.isEditable}>
-                    <div class="inline-lookup">
-                      <lightning-record-picker
+                    <div class="inline-combobox owner-combobox">
+                      <lightning-combobox
+                        name="owner"
                         label=""
-                        variant="label-hidden"
-                        object-api-name="User"
                         value={error.ownerId}
+                        options={userOptions}
                         onchange={handleOwnerChange}
                         data-error-id={error.id}
-                        placeholder="Search users..."
-                        matching-info={userMatchingInfo}
-                        display-info={userDisplayInfo}
-                        filter={userFilter}
-                      ></lightning-record-picker>
+                        variant="label-hidden"
+                        dropdown-alignment="auto"
+                        placeholder="Select owner..."
+                      ></lightning-combobox>
                     </div>
                   </template>
                   <template if:false={error.isEditable}>
@@ -372,6 +371,44 @@
             </template>
           </tbody>
         </table>
+
+        <!-- Pagination -->
+        <div class="pagination-bar">
+          <div class="pagination-left">
+            <span class="pagination-size-label">Rows per page:</span>
+            <lightning-combobox
+              name="pageSize"
+              label=""
+              value={pageSize}
+              options={pageSizeOptions}
+              onchange={handlePageSizeChange}
+              variant="label-hidden"
+              class="pagination-size-select"
+            ></lightning-combobox>
+          </div>
+          <div class="pagination-center">
+            <span class="pagination-label">{paginationLabel}</span>
+          </div>
+          <div class="pagination-right">
+            <lightning-button-icon
+              icon-name="utility:chevronleft"
+              alternative-text="Previous"
+              title="Previous Page"
+              onclick={handlePrevPage}
+              disabled={isPrevDisabled}
+              variant="border-filled"
+              class="slds-var-m-right_xx-small"
+            ></lightning-button-icon>
+            <lightning-button-icon
+              icon-name="utility:chevronright"
+              alternative-text="Next"
+              title="Next Page"
+              onclick={handleNextPage}
+              disabled={isNextDisabled}
+              variant="border-filled"
+            ></lightning-button-icon>
+          </div>
+        </div>
       </div>
     </template>
 
