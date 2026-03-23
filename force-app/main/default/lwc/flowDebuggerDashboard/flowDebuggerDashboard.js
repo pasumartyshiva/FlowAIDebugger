@@ -503,10 +503,11 @@ export default class FlowDebuggerDashboard extends LightningElement {
   handleRunAdHoc() {
     this.isLoading = true;
     runAdHocAnalysis()
-      .then(() => {
-        this.isLoading = false;
-        this.showToast('Analysis Started', 'Ad-hoc analysis initiated.', 'success');
-        setTimeout(() => this.loadData(), 2000);
+      .then((result) => {
+        this.showToast('Analysis Complete', result || 'Ad-hoc analysis initiated.', 'success');
+        // Switch to All Time so user can see all captured errors
+        this.timeRange = 'all';
+        this.loadData();
       })
       .catch(error => { this.isLoading = false; this.handleError('Error running analysis', error); });
   }
@@ -664,7 +665,7 @@ export default class FlowDebuggerDashboard extends LightningElement {
 
   get isPlatformEventsOn() { return this.config && this.config.isPlatformEventsEnabled; }
   get configStatus() { return this.isPlatformEventsOn ? 'ON' : 'OFF'; }
-  get isAdHocDisabled() { return this.isPlatformEventsOn; }
+  get isAdHocDisabled() { return false; }
   get isEmptyState() { return !this.isLoading && this.aggregatedErrors.length === 0; }
 
   get timeRange24hVariant() { return this.timeRange === '24h' ? 'brand' : 'neutral'; }

@@ -133,12 +133,13 @@ public with sharing class FlowDebuggerDashboardController {
             since = DateTime.newInstance(2000, 1, 1);
         }
 
-        // Build dynamic query
+        // Build dynamic query — exclude Resolved errors from the active table
         String query = 'SELECT Id, Flow_API_Name__c, Flow_Label__c, Element_API_Name__c, '
             + 'Error_Message__c, Error_Timestamp__c, Severity__c, Status__c, '
             + 'AI_Analysis_Complete__c, User__c, User__r.Name '
             + 'FROM Flow_Error_Log__c '
-            + 'WHERE Error_Timestamp__c >= :since';
+            + 'WHERE Error_Timestamp__c >= :since'
+            + ' AND Status__c != \'Resolved\'';
 
         if (String.isNotBlank(severityFilter) && severityFilter != 'All') {
             query += ' AND Severity__c = :severityFilter';
@@ -239,7 +240,17 @@ public with sharing class FlowDebuggerDashboardController {
     // ── Ad-Hoc Analysis ──
 
     @AuraEnabled
-    public static void runAdHocAnalysis() {
+    public static String runAdHocAnalysis() {
+        Integer newErrorsCreated = 0;
+
+        // Step 1: Poll Tooling API for failed flow interviews (last 24h)
+        try {
+            newErrorsCreated = pollAndCreateErrorLogs();
+        } catch (Exception e) {
+            System.debug(LoggingLevel.WARN, 'Poll failed (non-blocking): ' + e.getMessage());
+        }
+
+        // Step 2: Trigger AI analysis on any unanalyzed error logs
         List<Flow_Error_Log__c> unanalyzed = [
             SELECT Id
             FROM Flow_Error_Log__c
@@ -248,17 +259,157 @@ public with sharing class FlowDebuggerDashboardController {
             LIMIT 50
         ];
 
-        if (unanalyzed.isEmpty()) {
-            return;
+        if (!unanalyzed.isEmpty()) {
+            Set<Id> ids = new Set<Id>();
+            for (Flow_Error_Log__c log : unanalyzed) {
+                ids.add(log.Id);
+            }
+            FlowErrorAnalysisService.performAIAnalysisAsync(ids);
         }
 
-        Set<Id> ids = new Set<Id>();
-        for (Flow_Error_Log__c log : unanalyzed) {
-            ids.add(log.Id);
+        // Return count for the UI
+        Integer totalErrors = [SELECT COUNT() FROM Flow_Error_Log__c WHERE Status__c != 'Resolved'];
+        String msg = totalErrors + ' active error(s) found.';
+        if (newErrorsCreated > 0) {
+            msg += ' ' + newErrorsCreated + ' new error(s) captured.';
+        }
+        if (!unanalyzed.isEmpty()) {
+            msg += ' ' + unanalyzed.size() + ' queued for AI analysis.';
+        }
+        return msg;
+    }
+
+    /**
+     * Synchronous polling via Tooling API — finds failed FlowInterviews
+     * from the last 24 hours and creates Flow_Error_Log__c records directly.
+     * Returns the number of new error logs created.
+     */
+    private static Integer pollAndCreateErrorLogs() {
+        String sinceStr = System.now().addHours(-24).formatGmt('yyyy-MM-dd\'T\'HH:mm:ss\'Z\'');
+        String query = 'SELECT Id, FlowVersionViewId, CurrentElement, InterviewStatus, '
+            + 'InterviewLabel, CreatedDate, CreatedById '
+            + 'FROM FlowInterview '
+            + 'WHERE InterviewStatus = \'Failed\' '
+            + 'AND CreatedDate >= ' + sinceStr;
+
+        HttpRequest req = new HttpRequest();
+        req.setEndpoint(URL.getOrgDomainUrl().toExternalForm()
+            + '/services/data/v62.0/tooling/query?q='
+            + EncodingUtil.urlEncode(query, 'UTF-8'));
+        req.setMethod('GET');
+        req.setHeader('Authorization', 'Bearer ' + UserInfo.getSessionId());
+        req.setHeader('Content-Type', 'application/json');
+
+        Http http = new Http();
+        HttpResponse res = http.send(req);
+
+        if (res.getStatusCode() != 200) {
+            System.debug(LoggingLevel.WARN, 'Tooling API returned: ' + res.getStatusCode() + ' ' + res.getBody());
+            return 0;
         }
 
-        // Trigger async AI analysis
-        FlowErrorAnalysisService.performAIAnalysisAsync(ids);
+        Map<String, Object> result = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+        List<Object> records = (List<Object>) result.get('records');
+
+        if (records == null || records.isEmpty()) {
+            return 0;
+        }
+
+        // Get existing interview GUIDs to avoid duplicates
+        Set<String> existingGuids = new Set<String>();
+        for (Flow_Error_Log__c existing : [
+            SELECT Interview_GUID__c FROM Flow_Error_Log__c
+            WHERE Interview_GUID__c != null
+            AND Error_Timestamp__c >= :System.now().addHours(-24)
+        ]) {
+            existingGuids.add(existing.Interview_GUID__c);
+        }
+
+        List<Flow_Error_Log__c> newLogs = new List<Flow_Error_Log__c>();
+
+        for (Object record : records) {
+            Map<String, Object> interview = (Map<String, Object>) record;
+            String interviewId = (String) interview.get('Id');
+
+            // Skip duplicates
+            if (existingGuids.contains(interviewId)) {
+                continue;
+            }
+
+            // Get flow details from Tooling API
+            String flowVersionId = (String) interview.get('FlowVersionViewId');
+            Map<String, String> flowInfo = getFlowInfo(flowVersionId);
+
+            Flow_Error_Log__c log = new Flow_Error_Log__c(
+                Flow_API_Name__c = flowInfo.get('apiName'),
+                Flow_Label__c = flowInfo.get('label'),
+                Element_API_Name__c = (String) interview.get('CurrentElement'),
+                Error_Message__c = 'Flow interview failed. Interview: '
+                    + (String) interview.get('InterviewLabel'),
+                Error_Type__c = 'FLOW_INTERVIEW_FAILED',
+                Interview_GUID__c = interviewId,
+                User__c = (String) interview.get('CreatedById'),
+                Error_Timestamp__c = DateTime.valueOf(
+                    ((String) interview.get('CreatedDate')).replace('T', ' ').replace('.000+0000', '')
+                ),
+                Severity__c = 'Medium',
+                Status__c = 'New',
+                AI_Analysis_Complete__c = false
+            );
+
+            newLogs.add(log);
+        }
+
+        if (!newLogs.isEmpty()) {
+            insert newLogs;
+        }
+
+        return newLogs.size();
+    }
+
+    /**
+     * Retrieves flow API name and label from Tooling API.
+     */
+    private static Map<String, String> getFlowInfo(String flowVersionId) {
+        Map<String, String> info = new Map<String, String>{
+            'apiName' => 'Unknown',
+            'label' => 'Unknown Flow'
+        };
+
+        if (String.isBlank(flowVersionId)) return info;
+
+        try {
+            String query = 'SELECT Definition.DeveloperName, Definition.MasterLabel '
+                + 'FROM FlowVersionView WHERE DurableId = \'' + String.escapeSingleQuotes(flowVersionId) + '\'';
+
+            HttpRequest req = new HttpRequest();
+            req.setEndpoint(URL.getOrgDomainUrl().toExternalForm()
+                + '/services/data/v62.0/tooling/query?q='
+                + EncodingUtil.urlEncode(query, 'UTF-8'));
+            req.setMethod('GET');
+            req.setHeader('Authorization', 'Bearer ' + UserInfo.getSessionId());
+            req.setHeader('Content-Type', 'application/json');
+
+            Http http = new Http();
+            HttpResponse res = http.send(req);
+
+            if (res.getStatusCode() == 200) {
+                Map<String, Object> result = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+                List<Object> records = (List<Object>) result.get('records');
+                if (records != null && !records.isEmpty()) {
+                    Map<String, Object> rec = (Map<String, Object>) records[0];
+                    Map<String, Object> def = (Map<String, Object>) rec.get('Definition');
+                    if (def != null) {
+                        info.put('apiName', (String) def.get('DeveloperName'));
+                        info.put('label', (String) def.get('MasterLabel'));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.debug(LoggingLevel.WARN, 'getFlowInfo failed: ' + e.getMessage());
+        }
+
+        return info;
     }
 
     // ── Config ──
