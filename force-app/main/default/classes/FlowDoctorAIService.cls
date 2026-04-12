@@ -106,12 +106,6 @@ public with sharing class FlowDoctorAIService {
 
             if (response != null && response.generations != null && !response.generations.isEmpty()) {
                 ConnectApi.EinsteinLLMGenerationItemOutput generation = response.generations[0];
-                if (generation == null) {
-                    throw new FlowDoctorAIException('Einstein LLM returned a null generation item from prompt template.');
-                }
-                if (String.isBlank(generation.text)) {
-                    throw new FlowDoctorAIException('Einstein LLM returned an empty response from prompt template.');
-                }
                 return generation.text;
             }
 
@@ -124,13 +118,9 @@ public with sharing class FlowDoctorAIService {
             if (einsteinError.getTypeName() != null) {
                 detailedError += ' [Type: ' + einsteinError.getTypeName() + ']';
             }
-            String diagHint = 'Ensure the FlowErrorDebugger template is deployed and published in Prompt Builder.';
-            if (detailedError != null && detailedError.containsIgnoreCase('targetsList')) {
-                diagHint = 'The prompt template appears inactive or its input variable bindings are missing. '
-                         + 'Open Prompt Builder, open the FlowErrorDebugger template, verify all input variables '
-                         + 'are defined, and click Publish.';
-            }
-            throw new FlowDoctorAIException('Prompt template call failed. ' + diagHint + ' Error: ' + detailedError);
+            throw new FlowDoctorAIException(
+                'Prompt template call failed. Ensure the FlowErrorDebugger template is deployed and published in Prompt Builder. Error: ' + detailedError
+            );
         }
     }
 
